@@ -4,7 +4,6 @@ import com.azure.core.http.rest.Response;
 import com.azure.core.util.Context;
 import com.azure.storage.blob.batch.BlobBatch;
 import com.azure.storage.blob.batch.BlobBatchClient;
-import com.azure.storage.blob.batch.BlobBatchOperationResponse;
 import com.azure.storage.blob.batch.BlobBatchStorageException;
 import com.azure.storage.blob.models.DeleteSnapshotsOptionType;
 import com.example.batchdelete.model.BlobDeleteRequest;
@@ -12,7 +11,7 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import java.time.Duration;
-import java.util.Collections;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.Callable;
 
@@ -37,21 +36,23 @@ public class BlobBatchDeletionTask implements Callable<BatchDeletionResult> {
         int successCount = 0;
         int failureCount = 0;
         BlobBatch blobBatch = blobBatchClient.getBlobBatch();
+        List<Response<Void>> blobDeletionResponses = new ArrayList<>(requests.size());
 
         try {
             for (BlobDeleteRequest request : requests) {
-                blobBatch.deleteBlob(request.getContainerName(), request.getBlobName(),
+                Response<Void> responseHandle = blobBatch.deleteBlob(request.getContainerName(), request.getBlobName(),
                         DeleteSnapshotsOptionType.INCLUDE, null);
+                blobDeletionResponses.add(responseHandle);
             }
 
-            Response<BlobBatchOperationResponse> response = blobBatchClient.submitBatchWithResponse(blobBatch, false,
+            Response<Void> batchResponse = blobBatchClient.submitBatchWithResponse(blobBatch, false,
                     DEFAULT_TIMEOUT, Context.NONE);
-            BlobBatchOperationResponse operationResponse = response.getValue();
-            List<Response<Void>> subResponses = operationResponse != null ? operationResponse.getSubResponses()
-                    : Collections.emptyList();
+            if (batchResponse != null) {
+                LOGGER.debug("Blob batch submission completed with status code {}", batchResponse.getStatusCode());
+            }
 
-            for (int i = 0; i < subResponses.size() && i < requests.size(); i++) {
-                Response<Void> subResponse = subResponses.get(i);
+            for (int i = 0; i < blobDeletionResponses.size() && i < requests.size(); i++) {
+                Response<Void> subResponse = blobDeletionResponses.get(i);
                 BlobDeleteRequest request = requests.get(i);
                 int statusCode = subResponse.getStatusCode();
                 if (statusCode >= 200 && statusCode < 300) {
@@ -67,8 +68,8 @@ public class BlobBatchDeletionTask implements Callable<BatchDeletionResult> {
                 }
             }
 
-            if (subResponses.size() != requests.size()) {
-                LOGGER.warn("Blob batch response count ({}) does not match request count ({})", subResponses.size(),
+            if (blobDeletionResponses.size() != requests.size()) {
+                LOGGER.warn("Blob batch response count ({}) does not match request count ({})", blobDeletionResponses.size(),
                         requests.size());
             }
         } catch (BlobBatchStorageException ex) {
