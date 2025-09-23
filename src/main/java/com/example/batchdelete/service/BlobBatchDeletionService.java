@@ -16,11 +16,10 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
-import java.util.concurrent.CompletionService;
-import java.util.concurrent.ExecutorCompletionService;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -50,28 +49,35 @@ public class BlobBatchDeletionService {
         BlobBatchClient blobBatchClient = new BlobBatchClientBuilder(blobServiceClient).buildClient();
 
         ExecutorService executorService = Executors.newFixedThreadPool(config.getThreadPoolSize());
-        CompletionService<BatchDeletionResult> completionService = new ExecutorCompletionService<>(executorService);
-        List<Future<BatchDeletionResult>> futures = new ArrayList<>();
+        List<CompletableFuture<BatchDeletionResult>> futures = new ArrayList<>();
 
         try {
             reader.readBatches(config.getBatchSize(), batch -> {
-                Future<BatchDeletionResult> future = completionService.submit(
-                        new BlobBatchDeletionTask(blobBatchClient, batch));
+                BlobBatchDeletionTask task = new BlobBatchDeletionTask(blobBatchClient, batch);
+                CompletableFuture<BatchDeletionResult> future = CompletableFuture.supplyAsync(task::call,
+                        executorService)
+                        .exceptionally(ex -> {
+                            LOGGER.error("Batch execution failed", ex);
+                            return new BatchDeletionResult(0, 0);
+                        });
                 synchronized (futures) {
                     futures.add(future);
                 }
             });
 
-            BatchDeletionResult totalResult = new BatchDeletionResult(0, 0);
-            for (int i = 0; i < futures.size(); i++) {
-                Future<BatchDeletionResult> future = completionService.take();
-                try {
-                    BatchDeletionResult result = future.get();
-                    totalResult = totalResult.add(result);
-                } catch (Exception e) {
-                    LOGGER.error("Batch execution failed", e);
-                }
+            CompletableFuture<?>[] futuresArray = futures.toArray(new CompletableFuture[0]);
+            try {
+                CompletableFuture.allOf(futuresArray).get();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw e;
+            } catch (ExecutionException e) {
+                LOGGER.error("Batch execution failed", e.getCause());
             }
+
+            BatchDeletionResult totalResult = futures.stream()
+                    .map(CompletableFuture::join)
+                    .reduce(new BatchDeletionResult(0, 0), BatchDeletionResult::add);
 
             LOGGER.info("Batch processing completed. Success: {}, Failure: {}", totalResult.successCount(),
                     totalResult.failureCount());
