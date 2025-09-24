@@ -62,9 +62,10 @@ public class BlobBatchDeletionTask implements Callable<BatchDeletionResult> {
                 } else {
                     failureCount++;
                     String errorCode = subResponse.getHeaders().getValue("x-ms-error-code");
-                    LOGGER.error("Failed to delete blob {} from container {} (line {}), status code {}, error code {}",
+                    LOGGER.error(
+                            "Failed to delete blob {} from container {} (line {}), status code {}, error code {}. Line context: {}",
                             request.getBlobName(), request.getContainerName(), request.getLineNumber(), statusCode,
-                            errorCode);
+                            errorCode, formatLineContext(request));
                 }
             }
 
@@ -74,12 +75,27 @@ public class BlobBatchDeletionTask implements Callable<BatchDeletionResult> {
             }
         } catch (BlobBatchStorageException ex) {
             failureCount += requests.size();
-            LOGGER.error("Azure Storage batch error when deleting blobs", ex);
+            LOGGER.error("Azure Storage batch error when deleting blobs. Lines: {}", formatLineContexts(requests), ex);
         } catch (RuntimeException ex) {
             failureCount += requests.size();
-            LOGGER.error("Unexpected error when deleting blob batch", ex);
+            LOGGER.error("Unexpected error when deleting blob batch. Lines: {}", formatLineContexts(requests), ex);
         }
 
         return new BatchDeletionResult(successCount, failureCount);
+    }
+
+    private static String formatLineContext(BlobDeleteRequest request) {
+        return "line " + request.getLineNumber() + ": " + request.getRawLine();
+    }
+
+    private static String formatLineContexts(List<BlobDeleteRequest> requests) {
+        StringBuilder builder = new StringBuilder();
+        for (int i = 0; i < requests.size(); i++) {
+            if (i > 0) {
+                builder.append("; ");
+            }
+            builder.append(formatLineContext(requests.get(i)));
+        }
+        return builder.toString();
     }
 }

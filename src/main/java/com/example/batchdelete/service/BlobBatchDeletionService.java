@@ -7,6 +7,7 @@ import com.azure.storage.blob.batch.BlobBatchClient;
 import com.azure.storage.blob.batch.BlobBatchClientBuilder;
 import com.example.batchdelete.config.AppConfig;
 import com.example.batchdelete.io.CsvBlobDeleteRequestReader;
+import com.example.batchdelete.model.BlobDeleteRequest;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -16,7 +17,10 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.Queue;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -48,36 +52,43 @@ public class BlobBatchDeletionService {
 
         BlobBatchClient blobBatchClient = new BlobBatchClientBuilder(blobServiceClient).buildClient();
 
+        List<BlobDeleteRequest> requests = reader.readAllRequests();
+        Queue<BlobDeleteRequest> requestQueue = new ConcurrentLinkedQueue<>(requests);
+        LOGGER.info("Loaded {} blob delete requests from {}", requestQueue.size(), csvPath);
+
         ExecutorService executorService = Executors.newFixedThreadPool(config.getThreadPoolSize());
         List<CompletableFuture<BatchDeletionResult>> futures = new ArrayList<>();
 
         try {
-            reader.readBatches(config.getBatchSize(), batch -> {
-                BlobBatchDeletionTask task = new BlobBatchDeletionTask(blobBatchClient, batch);
-                CompletableFuture<BatchDeletionResult> future = CompletableFuture.supplyAsync(task::call,
-                        executorService)
-                        .exceptionally(ex -> {
-                            LOGGER.error("Batch execution failed", ex);
+            for (int i = 0; i < config.getThreadPoolSize(); i++) {
+                CompletableFuture<BatchDeletionResult> future = CompletableFuture
+                        .supplyAsync(() -> processQueue(blobBatchClient, requestQueue, config.getBatchSize()),
+                                executorService)
+                        .exceptionally(throwable -> {
+                            Throwable cause = throwable instanceof CompletionException ? throwable.getCause()
+                                    : throwable;
+                            LOGGER.error("Batch execution failed", cause);
                             return new BatchDeletionResult(0, 0);
                         });
-                synchronized (futures) {
-                    futures.add(future);
-                }
-            });
+                futures.add(future);
+            }
 
-            CompletableFuture<?>[] futuresArray = futures.toArray(new CompletableFuture[0]);
+            CompletableFuture<Void> allDone = CompletableFuture
+                    .allOf(futures.toArray(new CompletableFuture[0]));
             try {
-                CompletableFuture.allOf(futuresArray).get();
+                allDone.get();
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 throw e;
             } catch (ExecutionException e) {
-                LOGGER.error("Batch execution failed", e.getCause());
+                Throwable cause = e.getCause();
+                LOGGER.error("Error awaiting batch completion", cause != null ? cause : e);
             }
 
-            BatchDeletionResult totalResult = futures.stream()
-                    .map(CompletableFuture::join)
-                    .reduce(new BatchDeletionResult(0, 0), BatchDeletionResult::add);
+            BatchDeletionResult totalResult = new BatchDeletionResult(0, 0);
+            for (CompletableFuture<BatchDeletionResult> future : futures) {
+                totalResult = totalResult.add(future.join());
+            }
 
             LOGGER.info("Batch processing completed. Success: {}, Failure: {}", totalResult.successCount(),
                     totalResult.failureCount());
@@ -88,5 +99,31 @@ public class BlobBatchDeletionService {
                 executorService.shutdownNow();
             }
         }
+    }
+
+    private BatchDeletionResult processQueue(BlobBatchClient blobBatchClient, Queue<BlobDeleteRequest> requestQueue,
+                                             int batchSize) {
+        BatchDeletionResult totalResult = new BatchDeletionResult(0, 0);
+
+        while (true) {
+            List<BlobDeleteRequest> batch = new ArrayList<>(batchSize);
+            for (int i = 0; i < batchSize; i++) {
+                BlobDeleteRequest request = requestQueue.poll();
+                if (request == null) {
+                    break;
+                }
+                batch.add(request);
+            }
+
+            if (batch.isEmpty()) {
+                break;
+            }
+
+            BlobBatchDeletionTask task = new BlobBatchDeletionTask(blobBatchClient, batch);
+            BatchDeletionResult result = task.call();
+            totalResult = totalResult.add(result);
+        }
+
+        return totalResult;
     }
 }
