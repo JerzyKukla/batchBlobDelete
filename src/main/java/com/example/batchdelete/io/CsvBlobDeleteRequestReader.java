@@ -48,28 +48,11 @@ public class CsvBlobDeleteRequestReader {
 
             while ((line = reader.readLine()) != null) {
                 lineNumber++;
-                String trimmed = line.trim();
-                if (trimmed.isEmpty()) {
-                    LOGGER.warn("Skipping empty line {} in {}", lineNumber, csvPath);
+                BlobDeleteRequest request = parseLine(line, lineNumber, splitPattern);
+                if (request == null) {
                     continue;
                 }
 
-                String[] tokens = splitPattern.split(trimmed, -1);
-                if (tokens.length < 2) {
-                    LOGGER.error("Invalid CSV line {} in {}: expected at least 2 tokens but found {}. Line content: {}",
-                            lineNumber, csvPath, tokens.length, line);
-                    continue;
-                }
-
-                String containerName = stripQuotes(tokens[0]);
-                String blobName = stripQuotes(tokens[1]);
-                if (containerName.isEmpty() || blobName.isEmpty()) {
-                    LOGGER.error("Invalid CSV line {} in {}: container or blob name missing. Line content: {}",
-                            lineNumber, csvPath, line);
-                    continue;
-                }
-
-                BlobDeleteRequest request = new BlobDeleteRequest(containerName, blobName, lineNumber, line);
                 currentBatch.add(request);
 
                 if (currentBatch.size() == batchSize) {
@@ -84,8 +67,57 @@ public class CsvBlobDeleteRequestReader {
         }
     }
 
+    public List<BlobDeleteRequest> readAllRequests() throws IOException {
+        Pattern splitPattern = Pattern.compile(Pattern.quote(separator));
+        List<BlobDeleteRequest> requests = new ArrayList<>();
+
+        try (BufferedReader reader = Files.newBufferedReader(csvPath)) {
+            String line;
+            long lineNumber = 0;
+            if (hasHeader) {
+                reader.readLine();
+                lineNumber++;
+            }
+
+            while ((line = reader.readLine()) != null) {
+                lineNumber++;
+                BlobDeleteRequest request = parseLine(line, lineNumber, splitPattern);
+                if (request != null) {
+                    requests.add(request);
+                }
+            }
+        }
+
+        return requests;
+    }
+
     private static String stripQuotes(String value) {
         String cleaned = value.replace("\"", "").trim();
         return cleaned;
+    }
+
+    private BlobDeleteRequest parseLine(String line, long lineNumber, Pattern splitPattern) {
+        String trimmed = line.trim();
+        if (trimmed.isEmpty()) {
+            LOGGER.warn("Skipping empty line {} in {}", lineNumber, csvPath);
+            return null;
+        }
+
+        String[] tokens = splitPattern.split(trimmed, -1);
+        if (tokens.length < 2) {
+            LOGGER.error("Invalid CSV line {} in {}: expected at least 2 tokens but found {}. Line content: {}",
+                    lineNumber, csvPath, tokens.length, line);
+            return null;
+        }
+
+        String containerName = stripQuotes(tokens[0]);
+        String blobName = stripQuotes(tokens[1]);
+        if (containerName.isEmpty() || blobName.isEmpty()) {
+            LOGGER.error("Invalid CSV line {} in {}: container or blob name missing. Line content: {}",
+                    lineNumber, csvPath, line);
+            return null;
+        }
+
+        return new BlobDeleteRequest(containerName, blobName, lineNumber, line);
     }
 }
