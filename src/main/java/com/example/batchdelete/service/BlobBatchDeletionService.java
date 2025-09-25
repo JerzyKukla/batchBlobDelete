@@ -17,14 +17,13 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
-import java.util.Queue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
-import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Coordinates reading the CSV file and deleting the blobs in batches.
@@ -53,8 +52,8 @@ public class BlobBatchDeletionService {
         BlobBatchClient blobBatchClient = new BlobBatchClientBuilder(blobServiceClient).buildClient();
 
         List<BlobDeleteRequest> requests = reader.readAllRequests();
-        Queue<BlobDeleteRequest> requestQueue = new ConcurrentLinkedQueue<>(requests);
-        LOGGER.info("Loaded {} blob delete requests from {}", requestQueue.size(), csvPath);
+        AtomicInteger nextIndex = new AtomicInteger(0);
+        LOGGER.info("Loaded {} blob delete requests from {}", requests.size(), csvPath);
 
         ExecutorService executorService = Executors.newFixedThreadPool(config.getThreadPoolSize());
         List<CompletableFuture<BatchDeletionResult>> futures = new ArrayList<>();
@@ -62,7 +61,7 @@ public class BlobBatchDeletionService {
         try {
             for (int i = 0; i < config.getThreadPoolSize(); i++) {
                 CompletableFuture<BatchDeletionResult> future = CompletableFuture
-                        .supplyAsync(() -> processQueue(blobBatchClient, blobServiceClient, requestQueue,
+                        .supplyAsync(() -> processQueue(blobBatchClient, blobServiceClient, requests, nextIndex,
                                 config.getBatchSize()),
                                 executorService)
                         .exceptionally(throwable -> {
@@ -103,22 +102,17 @@ public class BlobBatchDeletionService {
     }
 
     private BatchDeletionResult processQueue(BlobBatchClient blobBatchClient, BlobServiceClient blobServiceClient,
-                                             Queue<BlobDeleteRequest> requestQueue, int batchSize) {
+                                             List<BlobDeleteRequest> requests, AtomicInteger nextIndex, int batchSize) {
         BatchDeletionResult totalResult = new BatchDeletionResult(0, 0);
 
         while (true) {
-            List<BlobDeleteRequest> batch = new ArrayList<>(batchSize);
-            for (int i = 0; i < batchSize; i++) {
-                BlobDeleteRequest request = requestQueue.poll();
-                if (request == null) {
-                    break;
-                }
-                batch.add(request);
-            }
-
-            if (batch.isEmpty()) {
+            int startIndex = nextIndex.getAndAdd(batchSize);
+            if (startIndex >= requests.size()) {
                 break;
             }
+
+            int endIndex = Math.min(startIndex + batchSize, requests.size());
+            List<BlobDeleteRequest> batch = new ArrayList<>(requests.subList(startIndex, endIndex));
 
             BlobBatchDeletionTask task = new BlobBatchDeletionTask(blobBatchClient, blobServiceClient, batch,
                     config.isSnapshotEnabled());
