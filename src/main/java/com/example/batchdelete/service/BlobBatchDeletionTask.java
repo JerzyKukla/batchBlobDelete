@@ -2,9 +2,14 @@ package com.example.batchdelete.service;
 
 import com.azure.core.http.rest.Response;
 import com.azure.core.util.Context;
+import com.azure.storage.blob.BlobClient;
+import com.azure.storage.blob.BlobContainerClient;
+import com.azure.storage.blob.BlobServiceClient;
 import com.azure.storage.blob.batch.BlobBatch;
 import com.azure.storage.blob.batch.BlobBatchClient;
 import com.azure.storage.blob.batch.BlobBatchStorageException;
+import com.azure.storage.blob.models.BlobSnapshotInfo;
+import com.azure.storage.blob.models.BlobStorageException;
 import com.azure.storage.blob.models.DeleteSnapshotsOptionType;
 import com.example.batchdelete.model.BlobDeleteRequest;
 import org.apache.logging.log4j.LogManager;
@@ -24,11 +29,16 @@ public class BlobBatchDeletionTask implements Callable<BatchDeletionResult> {
     private static final Duration DEFAULT_TIMEOUT = Duration.ofMinutes(2);
 
     private final BlobBatchClient blobBatchClient;
+    private final BlobServiceClient blobServiceClient;
     private final List<BlobDeleteRequest> requests;
+    private final boolean snapshotEnabled;
 
-    public BlobBatchDeletionTask(BlobBatchClient blobBatchClient, List<BlobDeleteRequest> requests) {
+    public BlobBatchDeletionTask(BlobBatchClient blobBatchClient, BlobServiceClient blobServiceClient,
+                                 List<BlobDeleteRequest> requests, boolean snapshotEnabled) {
         this.blobBatchClient = blobBatchClient;
+        this.blobServiceClient = blobServiceClient;
         this.requests = requests;
+        this.snapshotEnabled = snapshotEnabled;
     }
 
     @Override
@@ -40,6 +50,10 @@ public class BlobBatchDeletionTask implements Callable<BatchDeletionResult> {
 
         try {
             for (BlobDeleteRequest request : requests) {
+                if (snapshotEnabled) {
+                    createSnapshot(request);
+                }
+
                 Response<Void> responseHandle = blobBatch.deleteBlob(request.getContainerName(), request.getBlobName(),
                         DeleteSnapshotsOptionType.INCLUDE, null);
                 blobDeletionResponses.add(responseHandle);
@@ -82,6 +96,44 @@ public class BlobBatchDeletionTask implements Callable<BatchDeletionResult> {
         }
 
         return new BatchDeletionResult(successCount, failureCount);
+    }
+
+    private void createSnapshot(BlobDeleteRequest request) {
+        try {
+            BlobContainerClient containerClient = blobServiceClient.getBlobContainerClient(request.getContainerName());
+            if (!containerClient.exists()) {
+                LOGGER.warn("Container {} not found when creating snapshot for blob {} (line {}). Line context: {}",
+                        request.getContainerName(), request.getBlobName(), request.getLineNumber(),
+                        formatLineContext(request));
+                return;
+            }
+
+            BlobClient blobClient = containerClient.getBlobClient(request.getBlobName());
+            if (!blobClient.exists()) {
+                LOGGER.warn("Blob {} not found when creating snapshot in container {} (line {}). Line context: {}",
+                        request.getBlobName(), request.getContainerName(), request.getLineNumber(),
+                        formatLineContext(request));
+                return;
+            }
+
+            BlobSnapshotInfo snapshotInfo = blobClient.createSnapshot();
+            LOGGER.info("Created snapshot {} for blob {} in container {} (line {})", snapshotInfo.getSnapshot(),
+                    request.getBlobName(), request.getContainerName(), request.getLineNumber());
+        } catch (BlobStorageException ex) {
+            if (ex.getStatusCode() == 404) {
+                LOGGER.warn("Blob or container not found when creating snapshot for {} in container {} (line {}). Line context: {}",
+                        request.getBlobName(), request.getContainerName(), request.getLineNumber(),
+                        formatLineContext(request));
+            } else {
+                LOGGER.error("Failed to create snapshot for blob {} in container {} (line {}). Line context: {}",
+                        request.getBlobName(), request.getContainerName(), request.getLineNumber(),
+                        formatLineContext(request), ex);
+            }
+        } catch (RuntimeException ex) {
+            LOGGER.error("Unexpected error while creating snapshot for blob {} in container {} (line {}). Line context: {}",
+                    request.getBlobName(), request.getContainerName(), request.getLineNumber(),
+                    formatLineContext(request), ex);
+        }
     }
 
     private static String formatLineContext(BlobDeleteRequest request) {

@@ -62,7 +62,8 @@ public class BlobBatchDeletionService {
         try {
             for (int i = 0; i < config.getThreadPoolSize(); i++) {
                 CompletableFuture<BatchDeletionResult> future = CompletableFuture
-                        .supplyAsync(() -> processQueue(blobBatchClient, requestQueue, config.getBatchSize()),
+                        .supplyAsync(() -> processQueue(blobBatchClient, blobServiceClient, requestQueue,
+                                config.getBatchSize()),
                                 executorService)
                         .exceptionally(throwable -> {
                             Throwable cause = throwable instanceof CompletionException ? throwable.getCause()
@@ -101,8 +102,8 @@ public class BlobBatchDeletionService {
         }
     }
 
-    private BatchDeletionResult processQueue(BlobBatchClient blobBatchClient, Queue<BlobDeleteRequest> requestQueue,
-                                             int batchSize) {
+    private BatchDeletionResult processQueue(BlobBatchClient blobBatchClient, BlobServiceClient blobServiceClient,
+                                             Queue<BlobDeleteRequest> requestQueue, int batchSize) {
         BatchDeletionResult totalResult = new BatchDeletionResult(0, 0);
 
         while (true) {
@@ -119,7 +120,8 @@ public class BlobBatchDeletionService {
                 break;
             }
 
-            BlobBatchDeletionTask task = new BlobBatchDeletionTask(blobBatchClient, batch);
+            BlobBatchDeletionTask task = new BlobBatchDeletionTask(blobBatchClient, blobServiceClient, batch,
+                    config.isSnapshotEnabled());
             BatchDeletionResult result = task.call();
             totalResult = totalResult.add(result);
         }

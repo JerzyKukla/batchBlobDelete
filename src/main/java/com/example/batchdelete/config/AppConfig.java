@@ -21,9 +21,10 @@ public final class AppConfig {
     private final int threadPoolSize;
     private final String csvSeparator;
     private final boolean csvHasHeader;
+    private final boolean snapshotEnabled;
 
     private AppConfig(String inputFilePath, String storageEndpoint, int batchSize, int threadPoolSize,
-            String csvSeparator, boolean csvHasHeader) {
+            String csvSeparator, boolean csvHasHeader, boolean snapshotEnabled) {
         if (batchSize <= 0 || batchSize > MAX_BATCH_SIZE) {
             throw new IllegalArgumentException(
                     "batchSize must be between 1 and " + MAX_BATCH_SIZE + ", but was " + batchSize);
@@ -37,6 +38,7 @@ public final class AppConfig {
         this.threadPoolSize = threadPoolSize;
         this.csvSeparator = csvSeparator == null || csvSeparator.isEmpty() ? DEFAULT_SEPARATOR : csvSeparator;
         this.csvHasHeader = csvHasHeader;
+        this.snapshotEnabled = snapshotEnabled;
     }
 
     public String getInputFilePath() {
@@ -63,6 +65,10 @@ public final class AppConfig {
         return csvHasHeader;
     }
 
+    public boolean isSnapshotEnabled() {
+        return snapshotEnabled;
+    }
+
     public static AppConfig load(Path path) throws IOException {
         Properties properties = new Properties();
         try (InputStream inputStream = Files.newInputStream(path)) {
@@ -75,8 +81,10 @@ public final class AppConfig {
         int threadPoolSize = parseIntProperty(properties, "threadPoolSize", Runtime.getRuntime().availableProcessors());
         String csvSeparator = properties.getProperty("csvSeparator", DEFAULT_SEPARATOR);
         boolean csvHasHeader = parseBooleanProperty(properties, "csvHasHeader", true);
+        boolean snapshotEnabled = parseBooleanProperty(properties, "snapshotEnable", false);
 
-        return new AppConfig(inputFilePath, storageEndpoint, batchSize, threadPoolSize, csvSeparator, csvHasHeader);
+        return new AppConfig(inputFilePath, storageEndpoint, batchSize, threadPoolSize, csvSeparator, csvHasHeader,
+                snapshotEnabled);
     }
 
     private static String requireProperty(Properties properties, String propertyName) {
