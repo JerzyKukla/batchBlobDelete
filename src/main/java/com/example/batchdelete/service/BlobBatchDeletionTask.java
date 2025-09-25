@@ -47,6 +47,7 @@ public class BlobBatchDeletionTask implements Callable<BatchDeletionResult> {
         int failureCount = 0;
         BlobBatch blobBatch = blobBatchClient.getBlobBatch();
         List<Response<Void>> blobDeletionResponses = new ArrayList<>(requests.size());
+        List<BlobDeleteRequest> submittedRequests = new ArrayList<>(requests.size());
 
         try {
             for (BlobDeleteRequest request : requests) {
@@ -54,45 +55,71 @@ public class BlobBatchDeletionTask implements Callable<BatchDeletionResult> {
                     createSnapshot(request);
                 }
 
-                Response<Void> responseHandle = blobBatch.deleteBlob(request.getContainerName(), request.getBlobName(),
-                        DeleteSnapshotsOptionType.INCLUDE, null);
-                blobDeletionResponses.add(responseHandle);
-            }
-
-            Response<Void> batchResponse = blobBatchClient.submitBatchWithResponse(blobBatch, false,
-                    DEFAULT_TIMEOUT, Context.NONE);
-            if (batchResponse != null) {
-                LOGGER.debug("Blob batch submission completed with status code {}", batchResponse.getStatusCode());
-            }
-
-            for (int i = 0; i < blobDeletionResponses.size() && i < requests.size(); i++) {
-                Response<Void> subResponse = blobDeletionResponses.get(i);
-                BlobDeleteRequest request = requests.get(i);
-                int statusCode = subResponse.getStatusCode();
-                if (statusCode >= 200 && statusCode < 300) {
-                    successCount++;
-                    LOGGER.info("Successfully deleted blob {} from container {} (line {})", request.getBlobName(),
-                            request.getContainerName(), request.getLineNumber());
-                } else {
+                try {
+                    Response<Void> responseHandle = blobBatch.deleteBlob(request.getContainerName(),
+                            request.getBlobName(), DeleteSnapshotsOptionType.INCLUDE, null);
+                    blobDeletionResponses.add(responseHandle);
+                    submittedRequests.add(request);
+                } catch (RuntimeException ex) {
                     failureCount++;
-                    String errorCode = subResponse.getHeaders().getValue("x-ms-error-code");
-                    LOGGER.error(
-                            "Failed to delete blob {} from container {} (line {}), status code {}, error code {}. Line context: {}",
-                            request.getBlobName(), request.getContainerName(), request.getLineNumber(), statusCode,
-                            errorCode, formatLineContext(request));
+                    LOGGER.error("Failed to queue deletion for blob {} from container {} (line {}). Line context: {}",
+                            request.getBlobName(), request.getContainerName(), request.getLineNumber(),
+                            formatLineContext(request), ex);
                 }
             }
 
-            if (blobDeletionResponses.size() != requests.size()) {
-                LOGGER.warn("Blob batch response count ({}) does not match request count ({})", blobDeletionResponses.size(),
-                        requests.size());
+            if (!submittedRequests.isEmpty()) {
+                Response<Void> batchResponse = null;
+                try {
+                    batchResponse = blobBatchClient.submitBatchWithResponse(blobBatch, false,
+                            DEFAULT_TIMEOUT, Context.NONE);
+                } catch (BlobBatchStorageException ex) {
+                    LOGGER.error("Azure Storage batch error when deleting blobs. Lines: {}", formatLineContexts(submittedRequests),
+                            ex);
+                } catch (RuntimeException ex) {
+                    failureCount += submittedRequests.size();
+                    LOGGER.error("Unexpected error when submitting blob batch. Lines: {}",
+                            formatLineContexts(submittedRequests), ex);
+                    return new BatchDeletionResult(successCount, failureCount);
+                }
+
+                if (batchResponse != null) {
+                    LOGGER.debug("Blob batch submission completed with status code {}", batchResponse.getStatusCode());
+                }
             }
-        } catch (BlobBatchStorageException ex) {
-            failureCount += requests.size();
-            LOGGER.error("Azure Storage batch error when deleting blobs. Lines: {}", formatLineContexts(requests), ex);
+
+            for (int i = 0; i < blobDeletionResponses.size() && i < submittedRequests.size(); i++) {
+                Response<Void> subResponse = blobDeletionResponses.get(i);
+                BlobDeleteRequest request = submittedRequests.get(i);
+                try {
+                    int statusCode = subResponse.getStatusCode();
+                    if (statusCode >= 200 && statusCode < 300) {
+                        successCount++;
+                        LOGGER.info("Successfully deleted blob {} from container {} (line {})", request.getBlobName(),
+                                request.getContainerName(), request.getLineNumber());
+                    }
+                } catch (BlobStorageException ex) {
+                    failureCount++;
+                    LOGGER.error(
+                            "Failed to delete blob {} from container {} (line {}), status code {}, error code {}, service message {}. Line context: {}",
+                            request.getBlobName(), request.getContainerName(), request.getLineNumber(), ex.getStatusCode(),
+                            ex.getErrorCode(), ex.getServiceMessage(), formatLineContext(request));
+                } catch (RuntimeException ex) {
+                    failureCount++;
+                    LOGGER.error("Unexpected error when processing deletion response for blob {} from container {} (line {}). Line context: {}",
+                            request.getBlobName(), request.getContainerName(), request.getLineNumber(),
+                            formatLineContext(request), ex);
+                }
+            }
+
+            if (blobDeletionResponses.size() != submittedRequests.size()) {
+                LOGGER.warn("Blob batch response count ({}) does not match request count ({})", blobDeletionResponses.size(),
+                        submittedRequests.size());
+            }
         } catch (RuntimeException ex) {
-            failureCount += requests.size();
-            LOGGER.error("Unexpected error when deleting blob batch. Lines: {}", formatLineContexts(requests), ex);
+            failureCount += submittedRequests.isEmpty() ? requests.size() : submittedRequests.size();
+            LOGGER.error("Unexpected error when deleting blob batch. Lines: {}",
+                    formatLineContexts(submittedRequests.isEmpty() ? requests : submittedRequests), ex);
         }
 
         return new BatchDeletionResult(successCount, failureCount);
