@@ -5,6 +5,7 @@ import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Properties;
 
 /**
@@ -16,6 +17,7 @@ public final class AppConfig {
     private static final int MAX_BATCH_SIZE = 256;
 
     private final String inputFilePath;
+    private final String inputCsvContent;
     private final String storageEndpoint;
     private final int batchSize;
     private final int threadPoolSize;
@@ -23,8 +25,8 @@ public final class AppConfig {
     private final boolean csvHasHeader;
     private final boolean snapshotEnabled;
 
-    private AppConfig(String inputFilePath, String storageEndpoint, int batchSize, int threadPoolSize,
-            String csvSeparator, boolean csvHasHeader, boolean snapshotEnabled) {
+    private AppConfig(String inputFilePath, String inputCsvContent, String storageEndpoint, int batchSize,
+            int threadPoolSize, String csvSeparator, boolean csvHasHeader, boolean snapshotEnabled) {
         if (batchSize <= 0 || batchSize > MAX_BATCH_SIZE) {
             throw new IllegalArgumentException(
                     "batchSize must be between 1 and " + MAX_BATCH_SIZE + ", but was " + batchSize);
@@ -32,7 +34,14 @@ public final class AppConfig {
         if (threadPoolSize <= 0) {
             throw new IllegalArgumentException("threadPoolSize must be greater than zero");
         }
-        this.inputFilePath = Objects.requireNonNull(inputFilePath, "inputFilePath");
+        if ((inputFilePath == null || inputFilePath.isBlank()) && (inputCsvContent == null || inputCsvContent.isBlank())) {
+            throw new IllegalArgumentException("Either inputFilePath or inputCsvContent must be provided.");
+        }
+        if ((inputFilePath != null && !inputFilePath.isBlank()) && (inputCsvContent != null && !inputCsvContent.isBlank())) {
+            throw new IllegalArgumentException("Only one of inputFilePath or inputCsvContent can be provided.");
+        }
+        this.inputFilePath = inputFilePath == null || inputFilePath.isBlank() ? null : inputFilePath;
+        this.inputCsvContent = inputCsvContent == null || inputCsvContent.isBlank() ? null : inputCsvContent;
         this.storageEndpoint = Objects.requireNonNull(storageEndpoint, "storageEndpoint");
         this.batchSize = batchSize;
         this.threadPoolSize = threadPoolSize;
@@ -41,8 +50,12 @@ public final class AppConfig {
         this.snapshotEnabled = snapshotEnabled;
     }
 
-    public String getInputFilePath() {
-        return inputFilePath;
+    public Optional<String> getInputFilePath() {
+        return Optional.ofNullable(inputFilePath);
+    }
+
+    public Optional<String> getInputCsvContent() {
+        return Optional.ofNullable(inputCsvContent);
     }
 
     public String getStorageEndpoint() {
@@ -70,12 +83,28 @@ public final class AppConfig {
     }
 
     public static AppConfig load(Path path) throws IOException {
+        return load(path, null, null);
+    }
+
+    public static AppConfig load(Path path, String overrideInputFilePath, String overrideInputCsvContent)
+            throws IOException {
         Properties properties = new Properties();
         try (InputStream inputStream = Files.newInputStream(path)) {
             properties.load(inputStream);
         }
 
-        String inputFilePath = requireProperty(properties, "inputFilePath");
+        validateMutuallyExclusive(properties);
+
+        String inputFilePath = firstNonBlank(overrideInputFilePath, properties.getProperty("inputFilePath"));
+        String inputCsvContent = firstNonBlank(overrideInputCsvContent, properties.getProperty("inputCsvContent"));
+        if (!isBlank(inputCsvContent)) {
+            inputFilePath = null;
+        }
+        if (isBlank(inputFilePath) && isBlank(inputCsvContent)) {
+            throw new IllegalArgumentException(
+                    "Either inputFilePath or inputCsvContent must be provided (config or CLI override).");
+        }
+
         String storageEndpoint = requireProperty(properties, "storageEndpoint");
         int batchSize = parseIntProperty(properties, "batchSize", 255);
         int threadPoolSize = parseIntProperty(properties, "threadPoolSize", Runtime.getRuntime().availableProcessors());
@@ -83,8 +112,8 @@ public final class AppConfig {
         boolean csvHasHeader = parseBooleanProperty(properties, "csvHasHeader", true);
         boolean snapshotEnabled = parseBooleanProperty(properties, "snapshotEnable", false);
 
-        return new AppConfig(inputFilePath, storageEndpoint, batchSize, threadPoolSize, csvSeparator, csvHasHeader,
-                snapshotEnabled);
+        return new AppConfig(inputFilePath, inputCsvContent, storageEndpoint, batchSize, threadPoolSize, csvSeparator,
+                csvHasHeader, snapshotEnabled);
     }
 
     private static String requireProperty(Properties properties, String propertyName) {
@@ -114,5 +143,25 @@ public final class AppConfig {
             return defaultValue;
         }
         return Boolean.parseBoolean(value.trim());
+    }
+
+    private static void validateMutuallyExclusive(Properties properties) {
+        String filePath = properties.getProperty("inputFilePath");
+        String csvContent = properties.getProperty("inputCsvContent");
+        if (!isBlank(filePath) && !isBlank(csvContent)) {
+            throw new IllegalArgumentException(
+                    "Properties inputFilePath and inputCsvContent are mutually exclusive. Please configure only one.");
+        }
+    }
+
+    private static String firstNonBlank(String first, String second) {
+        if (!isBlank(first)) {
+            return first;
+        }
+        return isBlank(second) ? null : second;
+    }
+
+    private static boolean isBlank(String value) {
+        return value == null || value.isBlank();
     }
 }

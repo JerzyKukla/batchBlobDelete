@@ -59,6 +59,9 @@ The CSV file must contain at least two columns per line:
 
 Additional columns are ignored. If the file includes a header row, make sure `csvHasHeader` is set to `true` (default).
 
+Alternatively, you can embed the CSV payload directly in the configuration by setting `inputCsvContent` instead of
+`inputFilePath`. Only one of these properties can be defined at a time.
+
 Example:
 
 ```
@@ -85,9 +88,19 @@ The output artifact will be generated at `target/batch-blob-delete-1.0.0-shaded.
 After building, run the application with:
 
 ```bash
-java -jar target/batch-blob-delete-1.0.0-shaded.jar [path-to-config]
+java -jar target/batch-blob-delete-1.0.0-shaded.jar [options]
 ```
 
-If no argument is provided, `config/application.properties` is used.
+Common options:
+
+| Option | Description |
+|--------|-------------|
+| `-c, --config <path>` | Path to the configuration file (default: `config/application.properties`). |
+| `-f, --input-file <path>` | Override the CSV file path defined in the configuration file. |
+| `-d, --input-data <csv>` | Provide the CSV payload inline (mutually exclusive with `--input-file`). |
+| `-h, --help` | Prints CLI usage information. |
+
+When `--input-data` is provided, the CSV content is read directly from the argument, which is convenient when invoking the tool
+from other Java processes.
 
 The application logs progress, successes, and failures to the console using Log4j 2. Logs can be redirected or reconfigured by editing `src/main/resources/log4j2.xml`.
