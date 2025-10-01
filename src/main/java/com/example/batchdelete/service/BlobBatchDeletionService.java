@@ -40,9 +40,35 @@ public class BlobBatchDeletionService {
     }
 
     public void execute() throws IOException, InterruptedException {
-        Path csvPath = Path.of(config.getInputFilePath());
-        CsvBlobDeleteRequestReader reader = new CsvBlobDeleteRequestReader(csvPath, config.getCsvSeparator(),
+        CsvBlobDeleteRequestReader reader = createReaderFromConfig();
+        execute(reader);
+    }
+
+    public void executeWithCsvContent(String csvContent) throws IOException, InterruptedException {
+        Objects.requireNonNull(csvContent, "csvContent");
+        CsvBlobDeleteRequestReader reader = CsvBlobDeleteRequestReader.forContent(csvContent, config.getCsvSeparator(),
                 config.isCsvHasHeader());
+        execute(reader);
+    }
+
+    public void executeWithInputFile(Path csvPath) throws IOException, InterruptedException {
+        Objects.requireNonNull(csvPath, "csvPath");
+        CsvBlobDeleteRequestReader reader = CsvBlobDeleteRequestReader.forFile(csvPath, config.getCsvSeparator(),
+                config.isCsvHasHeader());
+        execute(reader);
+    }
+
+    private CsvBlobDeleteRequestReader createReaderFromConfig() {
+        return config.getInputCsvContent()
+                .map(content -> CsvBlobDeleteRequestReader.forContent(content, config.getCsvSeparator(),
+                        config.isCsvHasHeader()))
+                .orElseGet(() -> CsvBlobDeleteRequestReader
+                        .forFile(config.getInputFilePath().map(Path::of)
+                                .orElseThrow(() -> new IllegalStateException("No input source configured")),
+                                config.getCsvSeparator(), config.isCsvHasHeader()));
+    }
+
+    private void execute(CsvBlobDeleteRequestReader reader) throws IOException, InterruptedException {
 
         BlobServiceClient blobServiceClient = new BlobServiceClientBuilder()
                 .endpoint(config.getStorageEndpoint())
@@ -53,7 +79,7 @@ public class BlobBatchDeletionService {
 
         List<BlobDeleteRequest> requests = reader.readAllRequests();
         AtomicInteger nextIndex = new AtomicInteger(0);
-        LOGGER.info("Loaded {} blob delete requests from {}", requests.size(), csvPath);
+        LOGGER.info("Loaded {} blob delete requests from {}", requests.size(), reader.getSourceDescription());
 
         ExecutorService executorService = Executors.newFixedThreadPool(config.getThreadPoolSize());
         List<CompletableFuture<BatchDeletionResult>> futures = new ArrayList<>();

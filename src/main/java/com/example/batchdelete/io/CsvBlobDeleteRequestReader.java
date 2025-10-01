@@ -6,10 +6,12 @@ import org.apache.logging.log4j.Logger;
 
 import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.StringReader;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.regex.Pattern;
 
 /**
@@ -19,14 +21,40 @@ public class CsvBlobDeleteRequestReader {
 
     private static final Logger LOGGER = LogManager.getLogger(CsvBlobDeleteRequestReader.class);
 
-    private final Path csvPath;
+    @FunctionalInterface
+    private interface ReaderFactory {
+        BufferedReader create() throws IOException;
+    }
+
+    private final ReaderFactory readerFactory;
+    private final String sourceDescription;
     private final String separator;
     private final boolean hasHeader;
 
     public CsvBlobDeleteRequestReader(Path csvPath, String separator, boolean hasHeader) {
-        this.csvPath = csvPath;
+        this(createFileReaderFactory(csvPath), csvPath.toString(), separator, hasHeader);
+    }
+
+    private CsvBlobDeleteRequestReader(ReaderFactory readerFactory, String sourceDescription, String separator,
+            boolean hasHeader) {
+        this.readerFactory = readerFactory;
+        this.sourceDescription = sourceDescription;
         this.separator = separator;
         this.hasHeader = hasHeader;
+    }
+
+    public static CsvBlobDeleteRequestReader forFile(Path csvPath, String separator, boolean hasHeader) {
+        return new CsvBlobDeleteRequestReader(csvPath, separator, hasHeader);
+    }
+
+    public static CsvBlobDeleteRequestReader forContent(String csvContent, String separator, boolean hasHeader) {
+        Objects.requireNonNull(csvContent, "csvContent");
+        return new CsvBlobDeleteRequestReader(() -> new BufferedReader(new StringReader(csvContent)),
+                "inline CSV content", separator, hasHeader);
+    }
+
+    public String getSourceDescription() {
+        return sourceDescription;
     }
 
     public interface Consumer {
@@ -36,7 +64,7 @@ public class CsvBlobDeleteRequestReader {
     public void readBatches(int batchSize, Consumer consumer) throws IOException {
         Pattern splitPattern = Pattern.compile(Pattern.quote(separator));
 
-        try (BufferedReader reader = Files.newBufferedReader(csvPath)) {
+        try (BufferedReader reader = readerFactory.create()) {
             String line;
             long lineNumber = 0;
             if (hasHeader) {
@@ -71,7 +99,7 @@ public class CsvBlobDeleteRequestReader {
         Pattern splitPattern = Pattern.compile(Pattern.quote(separator));
         List<BlobDeleteRequest> requests = new ArrayList<>();
 
-        try (BufferedReader reader = Files.newBufferedReader(csvPath)) {
+        try (BufferedReader reader = readerFactory.create()) {
             String line;
             long lineNumber = 0;
             if (hasHeader) {
@@ -99,14 +127,14 @@ public class CsvBlobDeleteRequestReader {
     private BlobDeleteRequest parseLine(String line, long lineNumber, Pattern splitPattern) {
         String trimmed = line.trim();
         if (trimmed.isEmpty()) {
-            LOGGER.warn("Skipping empty line {} in {}", lineNumber, csvPath);
+            LOGGER.warn("Skipping empty line {} in {}", lineNumber, sourceDescription);
             return null;
         }
 
         String[] tokens = splitPattern.split(trimmed, -1);
         if (tokens.length < 2) {
             LOGGER.error("Invalid CSV line {} in {}: expected at least 2 tokens but found {}. Line content: {}",
-                    lineNumber, csvPath, tokens.length, line);
+                    lineNumber, sourceDescription, tokens.length, line);
             return null;
         }
 
@@ -114,10 +142,14 @@ public class CsvBlobDeleteRequestReader {
         String blobName = stripQuotes(tokens[1]);
         if (containerName.isEmpty() || blobName.isEmpty()) {
             LOGGER.error("Invalid CSV line {} in {}: container or blob name missing. Line content: {}",
-                    lineNumber, csvPath, line);
+                    lineNumber, sourceDescription, line);
             return null;
         }
 
         return new BlobDeleteRequest(containerName, blobName, lineNumber, line);
+    }
+
+    private static ReaderFactory createFileReaderFactory(Path csvPath) {
+        return () -> Files.newBufferedReader(csvPath);
     }
 }
