@@ -8,7 +8,7 @@ import com.azure.storage.blob.BlobServiceClient;
 import com.azure.storage.blob.batch.BlobBatch;
 import com.azure.storage.blob.batch.BlobBatchClient;
 import com.azure.storage.blob.batch.BlobBatchStorageException;
-import com.azure.storage.blob.models.BlobSnapshotInfo;
+import com.azure.storage.blob.specialized.BlobClientBase;
 import com.azure.storage.blob.models.BlobStorageException;
 import com.azure.storage.blob.models.DeleteSnapshotsOptionType;
 import com.example.batchdelete.model.BlobDeleteRequest;
@@ -156,8 +156,8 @@ public class BlobBatchDeletionTask implements Callable<BatchDeletionResult> {
                 return;
             }
 
-            BlobSnapshotInfo snapshotInfo = blobClient.createSnapshot();
-            LOGGER.info("Created snapshot {} for blob {} in container {} (line {})", snapshotInfo.getSnapshot(),
+            BlobClientBase snapshotInfo = blobClient.createSnapshot();
+            LOGGER.info("Created snapshot {} for blob {} in container {} (line {})", snapshotInfo.getSnapshotId(),
                     request.getBlobName(), request.getContainerName(), request.getLineNumber());
         } catch (BlobStorageException ex) {
             if (ex.getStatusCode() == 404) {
