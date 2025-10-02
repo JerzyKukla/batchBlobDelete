@@ -83,11 +83,11 @@ public final class AppConfig {
     }
 
     public static AppConfig load(Path path) throws IOException {
-        return load(path, null, null);
+        return load(path, null, null, null, null);
     }
 
-    public static AppConfig load(Path path, String overrideInputFilePath, String overrideInputCsvContent)
-            throws IOException {
+    public static AppConfig load(Path path, String overrideInputFilePath, String overrideInputCsvContent,
+            Integer overrideBatchSize, Integer overrideThreadPoolSize) throws IOException {
         Properties properties = new Properties();
         try (InputStream inputStream = Files.newInputStream(path)) {
             properties.load(inputStream);
@@ -106,8 +106,9 @@ public final class AppConfig {
         }
 
         String storageEndpoint = requireProperty(properties, "storageEndpoint");
-        int batchSize = parseIntProperty(properties, "batchSize", 255);
-        int threadPoolSize = parseIntProperty(properties, "threadPoolSize", Runtime.getRuntime().availableProcessors());
+        int batchSize = overrideBatchSize != null ? overrideBatchSize : parseIntProperty(properties, "batchSize", 255);
+        int threadPoolSize = overrideThreadPoolSize != null ? overrideThreadPoolSize
+                : parseIntProperty(properties, "threadPoolSize", Runtime.getRuntime().availableProcessors());
         String csvSeparator = properties.getProperty("csvSeparator", DEFAULT_SEPARATOR);
         boolean csvHasHeader = parseBooleanProperty(properties, "csvHasHeader", true);
         boolean snapshotEnabled = parseBooleanProperty(properties, "snapshotEnable", false);
