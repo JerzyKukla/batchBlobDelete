@@ -39,23 +39,23 @@ public class BlobBatchDeletionService {
         this.config = Objects.requireNonNull(config, "config");
     }
 
-    public void execute() throws IOException, InterruptedException {
+    public BatchDeletionResult execute() throws IOException, InterruptedException {
         CsvBlobDeleteRequestReader reader = createReaderFromConfig();
-        execute(reader);
+        return execute(reader);
     }
 
-    public void executeWithCsvContent(String csvContent) throws IOException, InterruptedException {
+    public BatchDeletionResult executeWithCsvContent(String csvContent) throws IOException, InterruptedException {
         Objects.requireNonNull(csvContent, "csvContent");
         CsvBlobDeleteRequestReader reader = CsvBlobDeleteRequestReader.forContent(csvContent, config.getCsvSeparator(),
                 config.isCsvHasHeader());
-        execute(reader);
+        return execute(reader);
     }
 
-    public void executeWithInputFile(Path csvPath) throws IOException, InterruptedException {
+    public BatchDeletionResult executeWithInputFile(Path csvPath) throws IOException, InterruptedException {
         Objects.requireNonNull(csvPath, "csvPath");
         CsvBlobDeleteRequestReader reader = CsvBlobDeleteRequestReader.forFile(csvPath, config.getCsvSeparator(),
                 config.isCsvHasHeader());
-        execute(reader);
+        return execute(reader);
     }
 
     private CsvBlobDeleteRequestReader createReaderFromConfig() {
@@ -68,7 +68,7 @@ public class BlobBatchDeletionService {
                                 config.getCsvSeparator(), config.isCsvHasHeader()));
     }
 
-    private void execute(CsvBlobDeleteRequestReader reader) throws IOException, InterruptedException {
+    private BatchDeletionResult execute(CsvBlobDeleteRequestReader reader) throws IOException, InterruptedException {
 
         BlobServiceClient blobServiceClient = new BlobServiceClientBuilder()
                 .endpoint(config.getStorageEndpoint())
@@ -83,6 +83,7 @@ public class BlobBatchDeletionService {
 
         ExecutorService executorService = Executors.newFixedThreadPool(config.getThreadPoolSize());
         List<CompletableFuture<BatchDeletionResult>> futures = new ArrayList<>();
+        BatchDeletionResult totalResult = new BatchDeletionResult(0, 0);
 
         try {
             for (int i = 0; i < config.getThreadPoolSize(); i++) {
@@ -111,7 +112,6 @@ public class BlobBatchDeletionService {
                 LOGGER.error("Error awaiting batch completion", cause != null ? cause : e);
             }
 
-            BatchDeletionResult totalResult = new BatchDeletionResult(0, 0);
             for (CompletableFuture<BatchDeletionResult> future : futures) {
                 totalResult = totalResult.add(future.join());
             }
@@ -125,6 +125,7 @@ public class BlobBatchDeletionService {
                 executorService.shutdownNow();
             }
         }
+        return totalResult;
     }
 
     private BatchDeletionResult processQueue(BlobBatchClient blobBatchClient, BlobServiceClient blobServiceClient,
