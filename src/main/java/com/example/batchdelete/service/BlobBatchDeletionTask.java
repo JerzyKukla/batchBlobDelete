@@ -80,6 +80,12 @@ public class BlobBatchDeletionTask implements Callable<BatchDeletionResult> {
                     failureCount += submittedRequests.size();
                     LOGGER.error("Unexpected error when submitting blob batch. Lines: {}",
                             formatLineContexts(submittedRequests), ex);
+                    for (BlobDeleteRequest failedRequest : submittedRequests) {
+                        LOGGER.error(
+                                "Failed to delete blob {} from container {} (line {}) due to batch submission error. Line context: {}",
+                                failedRequest.getBlobName(), failedRequest.getContainerName(),
+                                failedRequest.getLineNumber(), formatLineContext(failedRequest));
+                    }
                     return new BatchDeletionResult(successCount, failureCount);
                 }
 
@@ -120,6 +126,13 @@ public class BlobBatchDeletionTask implements Callable<BatchDeletionResult> {
             failureCount += submittedRequests.isEmpty() ? requests.size() : submittedRequests.size();
             LOGGER.error("Unexpected error when deleting blob batch. Lines: {}",
                     formatLineContexts(submittedRequests.isEmpty() ? requests : submittedRequests), ex);
+            List<BlobDeleteRequest> failedRequests = submittedRequests.isEmpty() ? requests : submittedRequests;
+            for (BlobDeleteRequest failedRequest : failedRequests) {
+                LOGGER.error(
+                        "Failed to delete blob {} from container {} (line {}) due to unexpected batch error. Line context: {}",
+                        failedRequest.getBlobName(), failedRequest.getContainerName(), failedRequest.getLineNumber(),
+                        formatLineContext(failedRequest));
+            }
         }
 
         return new BatchDeletionResult(successCount, failureCount);

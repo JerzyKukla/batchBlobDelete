@@ -1,6 +1,7 @@
 package com.example.batchdelete;
 
 import com.example.batchdelete.config.AppConfig;
+import com.example.batchdelete.service.BatchDeletionResult;
 import com.example.batchdelete.service.BlobBatchDeletionService;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -42,7 +43,11 @@ public final class BatchBlobDeleteApplication {
                             .orElse("inline CSV content"));
 
             BlobBatchDeletionService service = new BlobBatchDeletionService(config);
-            service.execute();
+            BatchDeletionResult result = service.execute();
+            if (result.failureCount() > 0) {
+                LOGGER.error("Batch completed with {} failures", result.failureCount());
+                System.exit(1);
+            }
         } catch (Exception ex) {
             LOGGER.fatal("Application failed", ex);
             System.exit(1);
