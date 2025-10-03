@@ -62,8 +62,10 @@ public class BlobBatchDeletionTask implements Callable<BatchDeletionResult> {
                     submittedRequests.add(request);
                 } catch (RuntimeException ex) {
                     failureCount++;
-                    LOGGER.error("Failed to queue deletion for blob {} from container {} (line {}). Line context: {}",
-                            request.getBlobName(), request.getContainerName(), request.getLineNumber(),
+                    LOGGER.error(
+                            "Failed to queue deletion for blob {} from container {} in storage account {} (line {}). Line context: {}",
+                            request.getBlobName(), request.getContainerName(), request.getStorageAccountName(),
+                            request.getLineNumber(),
                             formatLineContext(request), ex);
                 }
             }
@@ -82,9 +84,10 @@ public class BlobBatchDeletionTask implements Callable<BatchDeletionResult> {
                             formatLineContexts(submittedRequests), ex);
                     for (BlobDeleteRequest failedRequest : submittedRequests) {
                         LOGGER.error(
-                                "Failed to delete blob {} from container {} (line {}) due to batch submission error. Line context: {}",
+                                "Failed to delete blob {} from container {} in storage account {} (line {}) due to batch submission error. Line context: {}",
                                 failedRequest.getBlobName(), failedRequest.getContainerName(),
-                                failedRequest.getLineNumber(), formatLineContext(failedRequest));
+                                failedRequest.getStorageAccountName(), failedRequest.getLineNumber(),
+                                formatLineContext(failedRequest));
                     }
                     return new BatchDeletionResult(successCount, failureCount);
                 }
@@ -101,19 +104,23 @@ public class BlobBatchDeletionTask implements Callable<BatchDeletionResult> {
                     int statusCode = subResponse.getStatusCode();
                     if (statusCode >= 200 && statusCode < 300) {
                         successCount++;
-                        LOGGER.info("Successfully deleted blob {} from container {} (line {})", request.getBlobName(),
-                                request.getContainerName(), request.getLineNumber());
+                        LOGGER.info("Successfully deleted blob {} from container {} in storage account {} (line {})",
+                                request.getBlobName(), request.getContainerName(), request.getStorageAccountName(),
+                                request.getLineNumber());
                     }
                 } catch (BlobStorageException ex) {
                     failureCount++;
                     LOGGER.error(
-                            "Failed to delete blob {} from container {} (line {}), status code {}, error code {}, service message {}. Line context: {}",
-                            request.getBlobName(), request.getContainerName(), request.getLineNumber(), ex.getStatusCode(),
-                            ex.getErrorCode(), ex.getServiceMessage(), formatLineContext(request));
+                            "Failed to delete blob {} from container {} in storage account {} (line {}), status code {}, error code {}, service message {}. Line context: {}",
+                            request.getBlobName(), request.getContainerName(), request.getStorageAccountName(),
+                            request.getLineNumber(), ex.getStatusCode(), ex.getErrorCode(), ex.getServiceMessage(),
+                            formatLineContext(request));
                 } catch (RuntimeException ex) {
                     failureCount++;
-                    LOGGER.error("Unexpected error when processing deletion response for blob {} from container {} (line {}). Line context: {}",
-                            request.getBlobName(), request.getContainerName(), request.getLineNumber(),
+                    LOGGER.error(
+                            "Unexpected error when processing deletion response for blob {} from container {} in storage account {} (line {}). Line context: {}",
+                            request.getBlobName(), request.getContainerName(), request.getStorageAccountName(),
+                            request.getLineNumber(),
                             formatLineContext(request), ex);
                 }
             }
@@ -129,8 +136,9 @@ public class BlobBatchDeletionTask implements Callable<BatchDeletionResult> {
             List<BlobDeleteRequest> failedRequests = submittedRequests.isEmpty() ? requests : submittedRequests;
             for (BlobDeleteRequest failedRequest : failedRequests) {
                 LOGGER.error(
-                        "Failed to delete blob {} from container {} (line {}) due to unexpected batch error. Line context: {}",
-                        failedRequest.getBlobName(), failedRequest.getContainerName(), failedRequest.getLineNumber(),
+                        "Failed to delete blob {} from container {} in storage account {} (line {}) due to unexpected batch error. Line context: {}",
+                        failedRequest.getBlobName(), failedRequest.getContainerName(),
+                        failedRequest.getStorageAccountName(), failedRequest.getLineNumber(),
                         formatLineContext(failedRequest));
             }
         }
@@ -142,42 +150,49 @@ public class BlobBatchDeletionTask implements Callable<BatchDeletionResult> {
         try {
             BlobContainerClient containerClient = blobServiceClient.getBlobContainerClient(request.getContainerName());
             if (!containerClient.exists()) {
-                LOGGER.warn("Container {} not found when creating snapshot for blob {} (line {}). Line context: {}",
-                        request.getContainerName(), request.getBlobName(), request.getLineNumber(),
-                        formatLineContext(request));
+                LOGGER.warn(
+                        "Container {} not found when creating snapshot for blob {} in storage account {} (line {}). Line context: {}",
+                        request.getContainerName(), request.getBlobName(), request.getStorageAccountName(),
+                        request.getLineNumber(), formatLineContext(request));
                 return;
             }
 
             BlobClient blobClient = containerClient.getBlobClient(request.getBlobName());
             if (!blobClient.exists()) {
-                LOGGER.warn("Blob {} not found when creating snapshot in container {} (line {}). Line context: {}",
-                        request.getBlobName(), request.getContainerName(), request.getLineNumber(),
-                        formatLineContext(request));
+                LOGGER.warn(
+                        "Blob {} not found when creating snapshot in container {} for storage account {} (line {}). Line context: {}",
+                        request.getBlobName(), request.getContainerName(), request.getStorageAccountName(),
+                        request.getLineNumber(), formatLineContext(request));
                 return;
             }
 
             BlobClientBase snapshotInfo = blobClient.createSnapshot();
-            LOGGER.info("Created snapshot {} for blob {} in container {} (line {})", snapshotInfo.getSnapshotId(),
-                    request.getBlobName(), request.getContainerName(), request.getLineNumber());
+            LOGGER.info("Created snapshot {} for blob {} in container {} for storage account {} (line {})",
+                    snapshotInfo.getSnapshotId(), request.getBlobName(), request.getContainerName(),
+                    request.getStorageAccountName(), request.getLineNumber());
         } catch (BlobStorageException ex) {
             if (ex.getStatusCode() == 404) {
-                LOGGER.warn("Blob or container not found when creating snapshot for {} in container {} (line {}). Line context: {}",
-                        request.getBlobName(), request.getContainerName(), request.getLineNumber(),
-                        formatLineContext(request));
+                LOGGER.warn(
+                        "Blob or container not found when creating snapshot for {} in container {} for storage account {} (line {}). Line context: {}",
+                        request.getBlobName(), request.getContainerName(), request.getStorageAccountName(),
+                        request.getLineNumber(), formatLineContext(request));
             } else {
-                LOGGER.error("Failed to create snapshot for blob {} in container {} (line {}). Line context: {}",
-                        request.getBlobName(), request.getContainerName(), request.getLineNumber(),
-                        formatLineContext(request), ex);
+                LOGGER.error(
+                        "Failed to create snapshot for blob {} in container {} for storage account {} (line {}). Line context: {}",
+                        request.getBlobName(), request.getContainerName(), request.getStorageAccountName(),
+                        request.getLineNumber(), formatLineContext(request), ex);
             }
         } catch (RuntimeException ex) {
-            LOGGER.error("Unexpected error while creating snapshot for blob {} in container {} (line {}). Line context: {}",
-                    request.getBlobName(), request.getContainerName(), request.getLineNumber(),
-                    formatLineContext(request), ex);
+            LOGGER.error(
+                    "Unexpected error while creating snapshot for blob {} in container {} for storage account {} (line {}). Line context: {}",
+                    request.getBlobName(), request.getContainerName(), request.getStorageAccountName(),
+                    request.getLineNumber(), formatLineContext(request), ex);
         }
     }
 
     private static String formatLineContext(BlobDeleteRequest request) {
-        return "line " + request.getLineNumber() + ": " + request.getRawLine();
+        return "storage account '" + request.getStorageAccountName() + "', line " + request.getLineNumber() + ": "
+                + request.getRawLine();
     }
 
     private static String formatLineContexts(List<BlobDeleteRequest> requests) {

@@ -5,6 +5,7 @@ This project provides a command line utility that deletes blobs from an Azure St
 ## Features
 
 - Reads the CSV input file line by line to build deletion requests.
+- Supports deleting blobs across multiple Azure Storage accounts in a single run.
 - Configurable batch size, CSV separator and thread pool size.
 - Uses Azure `DefaultAzureCredential` so it can run inside environments with managed identity (e.g. AKS pods).
 - Logs every successful and failed deletion using Log4j 2.
@@ -32,9 +33,6 @@ Runtime configuration is provided through a properties file. An example file is 
 # Path to the input CSV file containing container and blob names to delete.
 inputFilePath=./data/input.csv
 
-# Azure Blob Storage service endpoint, e.g. https://<account-name>.blob.core.windows.net
-storageEndpoint=https://your-storage-account.blob.core.windows.net
-
 # Maximum number of blobs per batch (Azure limit is 256; default is 255)
 batchSize=255
 
@@ -48,14 +46,18 @@ csvSeparator=,
 csvHasHeader=true
 ```
 
+The storage account for each deletion request is provided in the CSV payload, so no endpoint configuration is required in the
+properties file.
+
 At runtime the application looks for `config/application.properties` by default. You can pass a different configuration file path as the first command line argument.
 
 ## CSV Format
 
-The CSV file must contain at least two columns per line:
+The CSV file must contain at least three columns per line:
 
-1. Container name.
-2. Blob name (relative path inside the container).
+1. Storage account name (e.g. `mystorageaccount`) or full blob service endpoint (e.g. `https://mystorageaccount.blob.core.windows.net`).
+2. Container name.
+3. Blob name (relative path inside the container).
 
 Additional columns are ignored. If the file includes a header row, make sure `csvHasHeader` is set to `true` (default).
 
@@ -65,10 +67,10 @@ Alternatively, you can embed the CSV payload directly in the configuration by se
 Example:
 
 ```
-container,blob
-invoices,2024/04/01/invoice-001.pdf
-invoices,2024/04/01/invoice-002.pdf
-archive,backup/file.zip
+storageAccount,container,blob
+mystorageaccount,invoices,2024/04/01/invoice-001.pdf
+mystorageaccount,invoices,2024/04/01/invoice-002.pdf
+archivestorage,archive,backup/file.zip
 ```
 
 ## Building

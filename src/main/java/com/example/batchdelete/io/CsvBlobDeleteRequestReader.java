@@ -132,21 +132,22 @@ public class CsvBlobDeleteRequestReader {
         }
 
         String[] tokens = splitPattern.split(trimmed, -1);
-        if (tokens.length < 2) {
-            LOGGER.error("Invalid CSV line {} in {}: expected at least 2 tokens but found {}. Line content: {}",
+        if (tokens.length < 3) {
+            LOGGER.error("Invalid CSV line {} in {}: expected at least 3 tokens but found {}. Line content: {}",
                     lineNumber, sourceDescription, tokens.length, line);
             return null;
         }
 
-        String containerName = stripQuotes(tokens[0]);
-        String blobName = stripQuotes(tokens[1]);
-        if (containerName.isEmpty() || blobName.isEmpty()) {
-            LOGGER.error("Invalid CSV line {} in {}: container or blob name missing. Line content: {}",
+        String storageAccountName = stripQuotes(tokens[0]);
+        String containerName = stripQuotes(tokens[1]);
+        String blobName = stripQuotes(tokens[2]);
+        if (storageAccountName.isEmpty() || containerName.isEmpty() || blobName.isEmpty()) {
+            LOGGER.error("Invalid CSV line {} in {}: storage account, container or blob name missing. Line content: {}",
                     lineNumber, sourceDescription, line);
             return null;
         }
 
-        return new BlobDeleteRequest(containerName, blobName, lineNumber, line);
+        return new BlobDeleteRequest(storageAccountName, containerName, blobName, lineNumber, line);
     }
 
     private static ReaderFactory createFileReaderFactory(Path csvPath) {
