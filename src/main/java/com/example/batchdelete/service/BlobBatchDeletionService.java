@@ -1,5 +1,6 @@
 package com.example.batchdelete.service;
 
+import com.azure.core.credential.TokenCredential;
 import com.azure.identity.DefaultAzureCredentialBuilder;
 import com.azure.storage.blob.BlobServiceClient;
 import com.azure.storage.blob.BlobServiceClientBuilder;
@@ -15,7 +16,9 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
@@ -32,11 +35,14 @@ public class BlobBatchDeletionService {
 
     private static final Logger LOGGER = LogManager.getLogger(BlobBatchDeletionService.class);
     private static final Duration TERMINATION_TIMEOUT = Duration.ofMinutes(2);
+    private static final String DEFAULT_BLOB_ENDPOINT_TEMPLATE = "https://%s.blob.core.windows.net";
 
     private final AppConfig config;
+    private final TokenCredential credential;
 
     public BlobBatchDeletionService(AppConfig config) {
         this.config = Objects.requireNonNull(config, "config");
+        this.credential = new DefaultAzureCredentialBuilder().build();
     }
 
     public BatchDeletionResult execute() throws IOException, InterruptedException {
@@ -70,34 +76,53 @@ public class BlobBatchDeletionService {
 
     private BatchDeletionResult execute(CsvBlobDeleteRequestReader reader) throws IOException, InterruptedException {
 
-        BlobServiceClient blobServiceClient = new BlobServiceClientBuilder()
-                .endpoint(config.getStorageEndpoint())
-                .credential(new DefaultAzureCredentialBuilder().build())
-                .buildClient();
-
-        BlobBatchClient blobBatchClient = new BlobBatchClientBuilder(blobServiceClient).buildClient();
-
         List<BlobDeleteRequest> requests = reader.readAllRequests();
-        AtomicInteger nextIndex = new AtomicInteger(0);
         LOGGER.info("Loaded {} blob delete requests from {}", requests.size(), reader.getSourceDescription());
+
+        if (requests.isEmpty()) {
+            LOGGER.info("No blob delete requests to process");
+            return new BatchDeletionResult(0, 0);
+        }
+
+        Map<String, List<BlobDeleteRequest>> requestsByAccount = groupRequestsByStorageAccount(requests);
+        LOGGER.info("Discovered {} storage account(s) in the input", requestsByAccount.size());
 
         ExecutorService executorService = Executors.newFixedThreadPool(config.getThreadPoolSize());
         List<CompletableFuture<BatchDeletionResult>> futures = new ArrayList<>();
         BatchDeletionResult totalResult = new BatchDeletionResult(0, 0);
 
         try {
-            for (int i = 0; i < config.getThreadPoolSize(); i++) {
-                CompletableFuture<BatchDeletionResult> future = CompletableFuture
-                        .supplyAsync(() -> processQueue(blobBatchClient, blobServiceClient, requests, nextIndex,
-                                config.getBatchSize()),
-                                executorService)
-                        .exceptionally(throwable -> {
-                            Throwable cause = throwable instanceof CompletionException ? throwable.getCause()
-                                    : throwable;
-                            LOGGER.error("Batch execution failed", cause);
-                            return new BatchDeletionResult(0, 0);
-                        });
-                futures.add(future);
+            for (Map.Entry<String, List<BlobDeleteRequest>> entry : requestsByAccount.entrySet()) {
+                String storageAccountName = entry.getKey();
+                List<BlobDeleteRequest> accountRequests = entry.getValue();
+
+                LOGGER.info("Scheduling {} request(s) for storage account {}", accountRequests.size(),
+                        storageAccountName);
+
+                BlobServiceClient blobServiceClient = new BlobServiceClientBuilder()
+                        .endpoint(resolveEndpoint(storageAccountName))
+                        .credential(credential)
+                        .buildClient();
+
+                BlobBatchClient blobBatchClient = new BlobBatchClientBuilder(blobServiceClient).buildClient();
+                AtomicInteger nextIndex = new AtomicInteger(0);
+                int workerCount = Math.min(config.getThreadPoolSize(), Math.max(1,
+                        (int) Math.ceil((double) accountRequests.size() / config.getBatchSize())));
+
+                for (int i = 0; i < workerCount; i++) {
+                    CompletableFuture<BatchDeletionResult> future = CompletableFuture
+                            .supplyAsync(
+                                    () -> processQueue(storageAccountName, blobBatchClient, blobServiceClient,
+                                            accountRequests, nextIndex, config.getBatchSize()),
+                                    executorService)
+                            .exceptionally(throwable -> {
+                                Throwable cause = throwable instanceof CompletionException ? throwable.getCause()
+                                        : throwable;
+                                LOGGER.error("Batch execution failed for storage account {}", storageAccountName, cause);
+                                return new BatchDeletionResult(0, 0);
+                            });
+                    futures.add(future);
+                }
             }
 
             CompletableFuture<Void> allDone = CompletableFuture
@@ -128,8 +153,9 @@ public class BlobBatchDeletionService {
         return totalResult;
     }
 
-    private BatchDeletionResult processQueue(BlobBatchClient blobBatchClient, BlobServiceClient blobServiceClient,
-                                             List<BlobDeleteRequest> requests, AtomicInteger nextIndex, int batchSize) {
+    private BatchDeletionResult processQueue(String storageAccountName, BlobBatchClient blobBatchClient,
+            BlobServiceClient blobServiceClient, List<BlobDeleteRequest> requests, AtomicInteger nextIndex,
+            int batchSize) {
         BatchDeletionResult totalResult = new BatchDeletionResult(0, 0);
 
         while (true) {
@@ -141,6 +167,8 @@ public class BlobBatchDeletionService {
             int endIndex = Math.min(startIndex + batchSize, requests.size());
             List<BlobDeleteRequest> batch = new ArrayList<>(requests.subList(startIndex, endIndex));
 
+            LOGGER.debug("Processing batch of {} blob(s) for storage account {}", batch.size(), storageAccountName);
+
             BlobBatchDeletionTask task = new BlobBatchDeletionTask(blobBatchClient, blobServiceClient, batch,
                     config.isSnapshotEnabled());
             BatchDeletionResult result = task.call();
@@ -148,5 +176,24 @@ public class BlobBatchDeletionService {
         }
 
         return totalResult;
+    }
+
+    private static Map<String, List<BlobDeleteRequest>> groupRequestsByStorageAccount(List<BlobDeleteRequest> requests) {
+        Map<String, List<BlobDeleteRequest>> grouped = new LinkedHashMap<>();
+        for (BlobDeleteRequest request : requests) {
+            grouped.computeIfAbsent(request.getStorageAccountName(), key -> new ArrayList<>()).add(request);
+        }
+        return grouped;
+    }
+
+    private static String resolveEndpoint(String storageAccountName) {
+        String trimmed = storageAccountName.trim();
+        if (trimmed.contains("://")) {
+            return trimmed;
+        }
+        if (trimmed.contains(".")) {
+            return "https://" + trimmed;
+        }
+        return String.format(DEFAULT_BLOB_ENDPOINT_TEMPLATE, trimmed);
     }
 }

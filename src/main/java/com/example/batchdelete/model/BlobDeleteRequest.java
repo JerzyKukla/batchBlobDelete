@@ -7,16 +7,23 @@ import java.util.Objects;
  */
 public final class BlobDeleteRequest {
 
+    private final String storageAccountName;
     private final String containerName;
     private final String blobName;
     private final long lineNumber;
     private final String rawLine;
 
-    public BlobDeleteRequest(String containerName, String blobName, long lineNumber, String rawLine) {
+    public BlobDeleteRequest(String storageAccountName, String containerName, String blobName, long lineNumber,
+            String rawLine) {
+        this.storageAccountName = Objects.requireNonNull(storageAccountName, "storageAccountName");
         this.containerName = Objects.requireNonNull(containerName, "containerName");
         this.blobName = Objects.requireNonNull(blobName, "blobName");
         this.lineNumber = lineNumber;
         this.rawLine = rawLine;
+    }
+
+    public String getStorageAccountName() {
+        return storageAccountName;
     }
 
     public String getContainerName() {
@@ -38,7 +45,8 @@ public final class BlobDeleteRequest {
     @Override
     public String toString() {
         return "BlobDeleteRequest{" +
-                "containerName='" + containerName + '\'' +
+                "storageAccountName='" + storageAccountName + '\'' +
+                ", containerName='" + containerName + '\'' +
                 ", blobName='" + blobName + '\'' +
                 ", lineNumber=" + lineNumber +
                 '}';

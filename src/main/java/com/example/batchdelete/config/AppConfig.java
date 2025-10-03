@@ -4,7 +4,6 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.Properties;
 
@@ -18,14 +17,13 @@ public final class AppConfig {
 
     private final String inputFilePath;
     private final String inputCsvContent;
-    private final String storageEndpoint;
     private final int batchSize;
     private final int threadPoolSize;
     private final String csvSeparator;
     private final boolean csvHasHeader;
     private final boolean snapshotEnabled;
 
-    private AppConfig(String inputFilePath, String inputCsvContent, String storageEndpoint, int batchSize,
+    private AppConfig(String inputFilePath, String inputCsvContent, int batchSize,
             int threadPoolSize, String csvSeparator, boolean csvHasHeader, boolean snapshotEnabled) {
         if (batchSize <= 0 || batchSize > MAX_BATCH_SIZE) {
             throw new IllegalArgumentException(
@@ -42,7 +40,6 @@ public final class AppConfig {
         }
         this.inputFilePath = inputFilePath == null || inputFilePath.isBlank() ? null : inputFilePath;
         this.inputCsvContent = inputCsvContent == null || inputCsvContent.isBlank() ? null : inputCsvContent;
-        this.storageEndpoint = Objects.requireNonNull(storageEndpoint, "storageEndpoint");
         this.batchSize = batchSize;
         this.threadPoolSize = threadPoolSize;
         this.csvSeparator = csvSeparator == null || csvSeparator.isEmpty() ? DEFAULT_SEPARATOR : csvSeparator;
@@ -56,10 +53,6 @@ public final class AppConfig {
 
     public Optional<String> getInputCsvContent() {
         return Optional.ofNullable(inputCsvContent);
-    }
-
-    public String getStorageEndpoint() {
-        return storageEndpoint;
     }
 
     public int getBatchSize() {
@@ -105,7 +98,6 @@ public final class AppConfig {
                     "Either inputFilePath or inputCsvContent must be provided (config or CLI override).");
         }
 
-        String storageEndpoint = requireProperty(properties, "storageEndpoint");
         int batchSize = overrideBatchSize != null ? overrideBatchSize : parseIntProperty(properties, "batchSize", 255);
         int threadPoolSize = overrideThreadPoolSize != null ? overrideThreadPoolSize
                 : parseIntProperty(properties, "threadPoolSize", Runtime.getRuntime().availableProcessors());
@@ -113,16 +105,8 @@ public final class AppConfig {
         boolean csvHasHeader = parseBooleanProperty(properties, "csvHasHeader", true);
         boolean snapshotEnabled = parseBooleanProperty(properties, "snapshotEnable", false);
 
-        return new AppConfig(inputFilePath, inputCsvContent, storageEndpoint, batchSize, threadPoolSize, csvSeparator,
+        return new AppConfig(inputFilePath, inputCsvContent, batchSize, threadPoolSize, csvSeparator,
                 csvHasHeader, snapshotEnabled);
-    }
-
-    private static String requireProperty(Properties properties, String propertyName) {
-        String value = properties.getProperty(propertyName);
-        if (value == null || value.isBlank()) {
-            throw new IllegalArgumentException("Missing required property '" + propertyName + "'.");
-        }
-        return value;
     }
 
     private static int parseIntProperty(Properties properties, String propertyName, int defaultValue) {
