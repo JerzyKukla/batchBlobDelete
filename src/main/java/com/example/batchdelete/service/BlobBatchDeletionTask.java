@@ -48,6 +48,8 @@ public class BlobBatchDeletionTask implements Callable<BatchDeletionResult> {
         BlobBatch blobBatch = blobBatchClient.getBlobBatch();
         List<Response<Void>> blobDeletionResponses = new ArrayList<>(requests.size());
         List<BlobDeleteRequest> submittedRequests = new ArrayList<>(requests.size());
+        List<String> successMessages = new ArrayList<>();
+        List<String> failureMessages = new ArrayList<>();
 
         try {
             for (BlobDeleteRequest request : requests) {
@@ -62,11 +64,12 @@ public class BlobBatchDeletionTask implements Callable<BatchDeletionResult> {
                     submittedRequests.add(request);
                 } catch (RuntimeException ex) {
                     failureCount++;
-                    LOGGER.error(
-                            "Failed to queue deletion for blob {} from container {} in storage account {} (line {}). Line context: {}",
+                    String message = String.format(
+                            "Failed to queue deletion for blob %s from container %s in storage account %s (line %d). Line context: %s",
                             request.getBlobName(), request.getContainerName(), request.getStorageAccountName(),
-                            request.getLineNumber(),
-                            formatLineContext(request), ex);
+                            request.getLineNumber(), formatLineContext(request));
+                    LOGGER.error(message, ex);
+                    failureMessages.add(message);
                 }
             }
 
@@ -83,13 +86,15 @@ public class BlobBatchDeletionTask implements Callable<BatchDeletionResult> {
                     LOGGER.error("Unexpected error when submitting blob batch. Lines: {}",
                             formatLineContexts(submittedRequests), ex);
                     for (BlobDeleteRequest failedRequest : submittedRequests) {
-                        LOGGER.error(
-                                "Failed to delete blob {} from container {} in storage account {} (line {}) due to batch submission error. Line context: {}",
+                        String message = String.format(
+                                "Failed to delete blob %s from container %s in storage account %s (line %d) due to batch submission error. Line context: %s",
                                 failedRequest.getBlobName(), failedRequest.getContainerName(),
                                 failedRequest.getStorageAccountName(), failedRequest.getLineNumber(),
                                 formatLineContext(failedRequest));
+                        LOGGER.error(message);
+                        failureMessages.add(message);
                     }
-                    return new BatchDeletionResult(successCount, failureCount);
+                    return new BatchDeletionResult(successCount, failureCount, successMessages, failureMessages);
                 }
 
                 if (batchResponse != null) {
@@ -104,24 +109,30 @@ public class BlobBatchDeletionTask implements Callable<BatchDeletionResult> {
                     int statusCode = subResponse.getStatusCode();
                     if (statusCode >= 200 && statusCode < 300) {
                         successCount++;
-                        LOGGER.info("Successfully deleted blob {} from container {} in storage account {} (line {})",
+                        String message = String.format(
+                                "Successfully deleted blob %s from container %s in storage account %s (line %d)",
                                 request.getBlobName(), request.getContainerName(), request.getStorageAccountName(),
                                 request.getLineNumber());
+                        LOGGER.info(message);
+                        successMessages.add(message);
                     }
                 } catch (BlobStorageException ex) {
                     failureCount++;
-                    LOGGER.error(
-                            "Failed to delete blob {} from container {} in storage account {} (line {}), status code {}, error code {}, service message {}. Line context: {}",
+                    String message = String.format(
+                            "Failed to delete blob %s from container %s in storage account %s (line %d), status code %d, error code %s, service message %s. Line context: %s",
                             request.getBlobName(), request.getContainerName(), request.getStorageAccountName(),
                             request.getLineNumber(), ex.getStatusCode(), ex.getErrorCode(), ex.getServiceMessage(),
                             formatLineContext(request));
+                    LOGGER.error(message);
+                    failureMessages.add(message);
                 } catch (RuntimeException ex) {
                     failureCount++;
-                    LOGGER.error(
-                            "Unexpected error when processing deletion response for blob {} from container {} in storage account {} (line {}). Line context: {}",
+                    String message = String.format(
+                            "Unexpected error when processing deletion response for blob %s from container %s in storage account %s (line %d). Line context: %s",
                             request.getBlobName(), request.getContainerName(), request.getStorageAccountName(),
-                            request.getLineNumber(),
-                            formatLineContext(request), ex);
+                            request.getLineNumber(), formatLineContext(request));
+                    LOGGER.error(message, ex);
+                    failureMessages.add(message);
                 }
             }
 
@@ -135,15 +146,17 @@ public class BlobBatchDeletionTask implements Callable<BatchDeletionResult> {
                     formatLineContexts(submittedRequests.isEmpty() ? requests : submittedRequests), ex);
             List<BlobDeleteRequest> failedRequests = submittedRequests.isEmpty() ? requests : submittedRequests;
             for (BlobDeleteRequest failedRequest : failedRequests) {
-                LOGGER.error(
-                        "Failed to delete blob {} from container {} in storage account {} (line {}) due to unexpected batch error. Line context: {}",
+                String message = String.format(
+                        "Failed to delete blob %s from container %s in storage account %s (line %d) due to unexpected batch error. Line context: %s",
                         failedRequest.getBlobName(), failedRequest.getContainerName(),
                         failedRequest.getStorageAccountName(), failedRequest.getLineNumber(),
                         formatLineContext(failedRequest));
+                LOGGER.error(message);
+                failureMessages.add(message);
             }
         }
 
-        return new BatchDeletionResult(successCount, failureCount);
+        return new BatchDeletionResult(successCount, failureCount, successMessages, failureMessages);
     }
 
     private void createSnapshot(BlobDeleteRequest request) {

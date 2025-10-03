@@ -44,6 +44,8 @@ public final class BatchBlobDeleteApplication {
 
             BlobBatchDeletionService service = new BlobBatchDeletionService(config);
             BatchDeletionResult result = service.execute();
+            result.failureMessages().forEach(System.out::println);
+            result.successMessages().forEach(System.out::println);
             if (result.failureCount() > 0) {
                 LOGGER.error("Batch completed with {} failures", result.failureCount());
                 System.exit(1);
