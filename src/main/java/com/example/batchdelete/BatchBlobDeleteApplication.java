@@ -36,7 +36,7 @@ public final class BatchBlobDeleteApplication {
             Path configPath = cliArguments.configPath().orElseGet(() -> Path.of("config", "application.properties"));
             AppConfig config = AppConfig.load(configPath, cliArguments.inputFilePath().orElse(null),
                     cliArguments.inputCsvData().orElse(null), cliArguments.batchSize().orElse(null),
-                    cliArguments.threadCount().orElse(null));
+                    cliArguments.threadCount().orElse(null), cliArguments.snapshotEnabled().orElse(null));
 
             LOGGER.info("Starting Batch Blob Delete application with {}",
                     config.getInputFilePath().<CharSequence>map(path -> "input file " + path)
@@ -57,12 +57,13 @@ public final class BatchBlobDeleteApplication {
     }
 
     private record CliArguments(Optional<Path> configPath, Optional<String> inputFilePath, Optional<String> inputCsvData,
-            Optional<Integer> batchSize, Optional<Integer> threadCount, boolean help) {
+            Optional<Integer> batchSize, Optional<Integer> threadCount, Optional<Boolean> snapshotEnabled,
+            boolean help) {
 
         private static CliArguments parse(String[] args) {
             if (args == null || args.length == 0) {
                 return new CliArguments(Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(),
-                        Optional.empty(), false);
+                        Optional.empty(), Optional.empty(), false);
             }
 
             Path configPath = null;
@@ -70,6 +71,7 @@ public final class BatchBlobDeleteApplication {
             String inputCsv = null;
             Integer batchSize = null;
             Integer threadCount = null;
+            Boolean snapshotEnabled = null;
             boolean help = false;
 
             for (int i = 0; i < args.length; i++) {
@@ -99,6 +101,10 @@ public final class BatchBlobDeleteApplication {
                     case "-t":
                         threadCount = parsePositiveInt(requireValue(arg, args, ++i), "thread count", null);
                         break;
+                    case "--snapshot-enabled":
+                    case "-s":
+                        snapshotEnabled = parseBoolean(requireValue(arg, args, ++i), "snapshot enabled");
+                        break;
                     default:
                         throw new IllegalArgumentException("Unknown argument: " + arg);
                 }
@@ -110,7 +116,7 @@ public final class BatchBlobDeleteApplication {
 
             return new CliArguments(Optional.ofNullable(configPath), Optional.ofNullable(inputFile),
                     Optional.ofNullable(inputCsv), Optional.ofNullable(batchSize), Optional.ofNullable(threadCount),
-                    help);
+                    Optional.ofNullable(snapshotEnabled), help);
         }
 
         private static String requireValue(String currentArg, String[] args, int valueIndex) {
@@ -136,6 +142,17 @@ public final class BatchBlobDeleteApplication {
             }
         }
 
+        private static boolean parseBoolean(String rawValue, String description) {
+            String normalizedValue = rawValue == null ? null : rawValue.trim().toLowerCase();
+            if (normalizedValue == null || normalizedValue.isEmpty()) {
+                throw new IllegalArgumentException("Invalid value for " + description + ": '" + rawValue + "'");
+            }
+            if (normalizedValue.equals("true") || normalizedValue.equals("false")) {
+                return Boolean.parseBoolean(normalizedValue);
+            }
+            throw new IllegalArgumentException("Invalid value for " + description + ": '" + rawValue + "'");
+        }
+
         static void printUsage() {
             String usage = "Usage: java -jar batch-blob-delete.jar [options]\n" +
                     "Options:\n" +
@@ -144,6 +161,8 @@ public final class BatchBlobDeleteApplication {
                     "  -d, --input-data <csv>    Provide inline CSV data (mutually exclusive with --input-file)\n" +
                     "  -b, --batch-size <size>   Override batch size (max 256)\n" +
                     "  -t, --threads <count>     Override thread pool size\n" +
+                    "  -s, --snapshot-enabled <true|false>\n" +
+                    "                             Override snapshot creation before delete\n" +
                     "  -h, --help                Show this help message";
             System.out.println(usage);
         }

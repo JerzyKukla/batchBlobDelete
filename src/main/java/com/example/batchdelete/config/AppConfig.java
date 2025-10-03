@@ -76,11 +76,12 @@ public final class AppConfig {
     }
 
     public static AppConfig load(Path path) throws IOException {
-        return load(path, null, null, null, null);
+        return load(path, null, null, null, null, null);
     }
 
     public static AppConfig load(Path path, String overrideInputFilePath, String overrideInputCsvContent,
-            Integer overrideBatchSize, Integer overrideThreadPoolSize) throws IOException {
+            Integer overrideBatchSize, Integer overrideThreadPoolSize, Boolean overrideSnapshotEnabled)
+            throws IOException {
         Properties properties = new Properties();
         try (InputStream inputStream = Files.newInputStream(path)) {
             properties.load(inputStream);
@@ -102,8 +103,9 @@ public final class AppConfig {
         int threadPoolSize = overrideThreadPoolSize != null ? overrideThreadPoolSize
                 : parseIntProperty(properties, "threadPoolSize", Runtime.getRuntime().availableProcessors());
         String csvSeparator = properties.getProperty("csvSeparator", DEFAULT_SEPARATOR);
-        boolean csvHasHeader = parseBooleanProperty(properties, "csvHasHeader", true);
-        boolean snapshotEnabled = parseBooleanProperty(properties, "snapshotEnable", false);
+        boolean csvHasHeader = parseBooleanProperty(properties, "csvHasHeader", null, true);
+        boolean snapshotEnabled = overrideSnapshotEnabled != null ? overrideSnapshotEnabled
+                : parseBooleanProperty(properties, "snapshotEnabled", "snapshotEnable", false);
 
         return new AppConfig(inputFilePath, inputCsvContent, batchSize, threadPoolSize, csvSeparator,
                 csvHasHeader, snapshotEnabled);
@@ -122,8 +124,12 @@ public final class AppConfig {
         }
     }
 
-    private static boolean parseBooleanProperty(Properties properties, String propertyName, boolean defaultValue) {
-        String value = properties.getProperty(propertyName);
+    private static boolean parseBooleanProperty(Properties properties, String primaryPropertyName,
+            String secondaryPropertyName, boolean defaultValue) {
+        String value = properties.getProperty(primaryPropertyName);
+        if (value == null || value.isBlank()) {
+            value = secondaryPropertyName == null ? null : properties.getProperty(secondaryPropertyName);
+        }
         if (value == null || value.isBlank()) {
             return defaultValue;
         }
