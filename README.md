@@ -124,4 +124,4 @@ The same CSV payload can also be passed from the command line after building the
 java -jar target/batch-blob-delete-1.0.0-shaded.jar --input-data "storageAccount,container,blob\nsaentdxcdevgia,ent,PL/2025/09/25/11/42/b748b266-0451-45f7-92cd-2ea910c09f371496190625%5E%5E%5E%5EINVOICE%5E%5E_ENT_KTW_GTA_CO_20250623_040606.TIF"
 ```
 
-The application logs progress, successes, and failures to the console using Log4j 2. Logs can be redirected or reconfigured by editing `src/main/resources/log4j2.xml`.
+The application logs progress, successes, and failures using Log4j 2. At startup it loads `config/log4j2.xml` when present, so you can edit that file to change appenders (for example to log to a specific file path) without rebuilding the JAR. If the file is missing, Log4j falls back to its built-in defaults.

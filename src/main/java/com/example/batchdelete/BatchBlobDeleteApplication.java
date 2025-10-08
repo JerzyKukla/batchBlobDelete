@@ -6,10 +6,15 @@ import com.example.batchdelete.service.BlobBatchDeletionService;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Optional;
 
 public final class BatchBlobDeleteApplication {
+
+    static {
+        configureLogging();
+    }
 
     private static final Logger LOGGER = LogManager.getLogger(BatchBlobDeleteApplication.class);
 
@@ -53,6 +58,17 @@ public final class BatchBlobDeleteApplication {
         } catch (Exception ex) {
             LOGGER.fatal("Application failed", ex);
             System.exit(1);
+        }
+    }
+
+    private static void configureLogging() {
+        if (System.getProperty("log4j.configurationFile") != null) {
+            return;
+        }
+
+        Path externalConfig = Path.of("config", "log4j2.xml");
+        if (Files.isRegularFile(externalConfig)) {
+            System.setProperty("log4j.configurationFile", externalConfig.toUri().toString());
         }
     }
 
