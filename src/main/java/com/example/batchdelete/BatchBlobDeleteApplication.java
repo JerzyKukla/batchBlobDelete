@@ -6,10 +6,15 @@ import com.example.batchdelete.service.BlobBatchDeletionService;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Optional;
 
 public final class BatchBlobDeleteApplication {
+
+    static {
+        configureLogging();
+    }
 
     private static final Logger LOGGER = LogManager.getLogger(BatchBlobDeleteApplication.class);
 
@@ -56,6 +61,17 @@ public final class BatchBlobDeleteApplication {
         }
     }
 
+    private static void configureLogging() {
+        if (System.getProperty("log4j.configurationFile") != null) {
+            return;
+        }
+
+        Path externalConfig = Path.of("config", "log4j2.xml");
+        if (Files.isRegularFile(externalConfig)) {
+            System.setProperty("log4j.configurationFile", externalConfig.toUri().toString());
+        }
+    }
+
     private record CliArguments(Optional<Path> configPath, Optional<String> inputFilePath, Optional<String> inputCsvData,
             Optional<Integer> batchSize, Optional<Integer> threadCount, Optional<Boolean> snapshotEnabled,
             boolean help) {
@@ -91,7 +107,7 @@ public final class BatchBlobDeleteApplication {
                         break;
                     case "--input-data":
                     case "-d":
-                        inputCsv = requireValue(arg, args, ++i);
+                        inputCsv = unescapeCsvContent(requireValue(arg, args, ++i));
                         break;
                     case "--batch-size":
                     case "-b":
@@ -151,6 +167,48 @@ public final class BatchBlobDeleteApplication {
                 return Boolean.parseBoolean(normalizedValue);
             }
             throw new IllegalArgumentException("Invalid value for " + description + ": '" + rawValue + "'");
+        }
+
+        private static String unescapeCsvContent(String rawValue) {
+            if (rawValue == null || rawValue.isEmpty()) {
+                return rawValue;
+            }
+
+            StringBuilder builder = new StringBuilder(rawValue.length());
+            boolean escaping = false;
+            for (int i = 0; i < rawValue.length(); i++) {
+                char current = rawValue.charAt(i);
+                if (escaping) {
+                    switch (current) {
+                        case 'n':
+                            builder.append('\n');
+                            break;
+                        case 'r':
+                            builder.append('\r');
+                            break;
+                        case 't':
+                            builder.append('\t');
+                            break;
+                        case '\\':
+                            builder.append('\\');
+                            break;
+                        default:
+                            builder.append('\\').append(current);
+                            break;
+                    }
+                    escaping = false;
+                } else if (current == '\\') {
+                    escaping = true;
+                } else {
+                    builder.append(current);
+                }
+            }
+
+            if (escaping) {
+                builder.append('\\');
+            }
+
+            return builder.toString();
         }
 
         static void printUsage() {
