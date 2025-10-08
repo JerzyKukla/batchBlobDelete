@@ -91,7 +91,7 @@ public final class BatchBlobDeleteApplication {
                         break;
                     case "--input-data":
                     case "-d":
-                        inputCsv = requireValue(arg, args, ++i);
+                        inputCsv = unescapeCsvContent(requireValue(arg, args, ++i));
                         break;
                     case "--batch-size":
                     case "-b":
@@ -151,6 +151,48 @@ public final class BatchBlobDeleteApplication {
                 return Boolean.parseBoolean(normalizedValue);
             }
             throw new IllegalArgumentException("Invalid value for " + description + ": '" + rawValue + "'");
+        }
+
+        private static String unescapeCsvContent(String rawValue) {
+            if (rawValue == null || rawValue.isEmpty()) {
+                return rawValue;
+            }
+
+            StringBuilder builder = new StringBuilder(rawValue.length());
+            boolean escaping = false;
+            for (int i = 0; i < rawValue.length(); i++) {
+                char current = rawValue.charAt(i);
+                if (escaping) {
+                    switch (current) {
+                        case 'n':
+                            builder.append('\n');
+                            break;
+                        case 'r':
+                            builder.append('\r');
+                            break;
+                        case 't':
+                            builder.append('\t');
+                            break;
+                        case '\\':
+                            builder.append('\\');
+                            break;
+                        default:
+                            builder.append('\\').append(current);
+                            break;
+                    }
+                    escaping = false;
+                } else if (current == '\\') {
+                    escaping = true;
+                } else {
+                    builder.append(current);
+                }
+            }
+
+            if (escaping) {
+                builder.append('\\');
+            }
+
+            return builder.toString();
         }
 
         static void printUsage() {
