@@ -66,9 +66,17 @@ public final class BatchBlobDeleteApplication {
             return;
         }
 
-        Path externalConfig = Path.of("config", "log4j2.xml");
-        if (Files.isRegularFile(externalConfig)) {
-            System.setProperty("log4j.configurationFile", externalConfig.toUri().toString());
+        Path configDir = Path.of("config");
+        Path[] candidates = {
+                configDir.resolve("log4j2.properties"),
+                configDir.resolve("log4j2.xml")
+        };
+
+        for (Path candidate : candidates) {
+            if (Files.isRegularFile(candidate)) {
+                System.setProperty("log4j.configurationFile", candidate.toUri().toString());
+                return;
+            }
         }
     }
 
