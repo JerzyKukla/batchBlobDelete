@@ -103,6 +103,25 @@ Common options:
 | `-h, --help` | Prints CLI usage information. |
 
 When `--input-data` is provided, the CSV content is read directly from the argument, which is convenient when invoking the tool
-from other Java processes.
+from other Java processes. Escaped newline (`\n`) and carriage return (`\r`) sequences are expanded automatically, letting you
+keep the entire payload on a single line when invoking the shaded JAR from a shell.
+
+### Example: delete a single blob inline
+
+If you only need to delete one blob you can call the application in a single line and embed both the CSV header and row in the `--input-data` argument. For example, the following Java snippet invokes the `main` method directly:
+
+```java
+BatchBlobDeleteApplication.main(new String[] {
+        "--input-data",
+        "storageAccount,container,blob\n" +
+                "saentdxcdevgia,ent,PL/2025/09/25/11/42/b748b266-0451-45f7-92cd-2ea910c09f371496190625%5E%5E%5E%5EINVOICE%5E%5E_ENT_KTW_GTA_CO_20250623_040606.TIF"
+});
+```
+
+The same CSV payload can also be passed from the command line after building the shaded JAR:
+
+```bash
+java -jar target/batch-blob-delete-1.0.0-shaded.jar --input-data "storageAccount,container,blob\nsaentdxcdevgia,ent,PL/2025/09/25/11/42/b748b266-0451-45f7-92cd-2ea910c09f371496190625%5E%5E%5E%5EINVOICE%5E%5E_ENT_KTW_GTA_CO_20250623_040606.TIF"
+```
 
 The application logs progress, successes, and failures to the console using Log4j 2. Logs can be redirected or reconfigured by editing `src/main/resources/log4j2.xml`.
