@@ -22,13 +22,16 @@ public final class BatchBlobDeleteApplication {
     }
 
     public static void main(String[] args) {
+        boolean singleResponseRequested = CliArguments.hasSingleResponseFlag(args);
         CliArguments cliArguments;
         try {
             cliArguments = CliArguments.parse(args);
         } catch (IllegalArgumentException ex) {
-            System.err.println("Error: " + ex.getMessage());
-            CliArguments.printUsage();
-            System.exit(1);
+            if (!singleResponseRequested) {
+                System.err.println("Error: " + ex.getMessage());
+                CliArguments.printUsage();
+            }
+            System.exit(singleResponseRequested ? 0 : 1);
             return;
         }
 
@@ -38,6 +41,7 @@ public final class BatchBlobDeleteApplication {
                 return;
             }
 
+            boolean singleResponse = cliArguments.singleResponse();
             Path configPath = cliArguments.configPath().orElseGet(() -> Path.of("config", "application.properties"));
             AppConfig config = AppConfig.load(configPath, cliArguments.inputFilePath().orElse(null),
                     cliArguments.inputCsvData().orElse(null), cliArguments.batchSize().orElse(null),
@@ -49,15 +53,23 @@ public final class BatchBlobDeleteApplication {
 
             BlobBatchDeletionService service = new BlobBatchDeletionService(config);
             BatchDeletionResult result = service.execute();
-            result.failureMessages().forEach(System.out::println);
-            result.successMessages().forEach(System.out::println);
+            int exitCode;
+            if (!singleResponse) {
+                result.failureMessages().forEach(System.out::println);
+                result.successMessages().forEach(System.out::println);
+            }
             if (result.failureCount() > 0) {
                 LOGGER.error("Batch completed with {} failures", result.failureCount());
-                System.exit(1);
+                exitCode = singleResponse ? 0 : 1;
+            } else {
+                exitCode = singleResponse ? 1 : 0;
+            }
+            if (singleResponse || exitCode != 0) {
+                System.exit(exitCode);
             }
         } catch (Exception ex) {
             LOGGER.fatal("Application failed", ex);
-            System.exit(1);
+            System.exit(cliArguments.singleResponse() ? 0 : 1);
         }
     }
 
@@ -82,12 +94,12 @@ public final class BatchBlobDeleteApplication {
 
     private record CliArguments(Optional<Path> configPath, Optional<String> inputFilePath, Optional<String> inputCsvData,
             Optional<Integer> batchSize, Optional<Integer> threadCount, Optional<Boolean> snapshotEnabled,
-            boolean help) {
+            boolean singleResponse, boolean help) {
 
         private static CliArguments parse(String[] args) {
             if (args == null || args.length == 0) {
                 return new CliArguments(Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(),
-                        Optional.empty(), Optional.empty(), false);
+                        Optional.empty(), Optional.empty(), false, false);
             }
 
             Path configPath = null;
@@ -96,6 +108,7 @@ public final class BatchBlobDeleteApplication {
             Integer batchSize = null;
             Integer threadCount = null;
             Boolean snapshotEnabled = null;
+            boolean singleResponse = false;
             boolean help = false;
 
             for (int i = 0; i < args.length; i++) {
@@ -129,6 +142,10 @@ public final class BatchBlobDeleteApplication {
                     case "-s":
                         snapshotEnabled = parseBoolean(requireValue(arg, args, ++i), "snapshot enabled");
                         break;
+                    case "--single-response":
+                    case "-sr":
+                        singleResponse = true;
+                        break;
                     default:
                         throw new IllegalArgumentException("Unknown argument: " + arg);
                 }
@@ -140,7 +157,19 @@ public final class BatchBlobDeleteApplication {
 
             return new CliArguments(Optional.ofNullable(configPath), Optional.ofNullable(inputFile),
                     Optional.ofNullable(inputCsv), Optional.ofNullable(batchSize), Optional.ofNullable(threadCount),
-                    Optional.ofNullable(snapshotEnabled), help);
+                    Optional.ofNullable(snapshotEnabled), singleResponse, help);
+        }
+
+        static boolean hasSingleResponseFlag(String[] args) {
+            if (args == null) {
+                return false;
+            }
+            for (String arg : args) {
+                if ("--single-response".equals(arg) || "-sr".equals(arg)) {
+                    return true;
+                }
+            }
+            return false;
         }
 
         private static String requireValue(String currentArg, String[] args, int valueIndex) {
@@ -229,6 +258,7 @@ public final class BatchBlobDeleteApplication {
                     "  -t, --threads <count>     Override thread pool size\n" +
                     "  -s, --snapshot-enabled <true|false>\n" +
                     "                             Override snapshot creation before delete\n" +
+                    "  -sr, --single-response    Exit with 1 on success and 0 on failure, suppressing output\n" +
                     "  -h, --help                Show this help message";
             System.out.println(usage);
         }
